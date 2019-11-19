@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  
+  <url>
+    <loc>https://adamhaber.github.io/</loc>
+    <lastmod>2019-11-18T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/tags/bayesian-models/</loc>
+    <lastmod>2019-11-18T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/post/mrp/</loc>
+    <lastmod>2019-11-18T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/tags/multilevel-models/</loc>
+    <lastmod>2019-11-18T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/post/</loc>
+    <lastmod>2019-11-18T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/tags/</loc>
+    <lastmod>2019-11-18T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/tags/tfp/</loc>
+    <lastmod>2019-11-18T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/tags/arviz/</loc>
+    <lastmod>2019-10-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/post/nuts/</loc>
+    <lastmod>2019-10-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/tags/nuts/</loc>
+    <lastmod>2019-10-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/tags/optimization/</loc>
+    <lastmod>2019-10-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/tags/survival-analysis/</loc>
+    <lastmod>2019-10-01T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/post/survival-analysis/</loc>
+    <lastmod>2019-10-01T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/post/varying-slopes/</loc>
+    <lastmod>2019-09-02T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/post/varying-intercepts/</loc>
+    <lastmod>2019-07-08T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/authors/admin/</loc>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/authors/</loc>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/categories/</loc>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/publication_types/</loc>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/publication/</loc>
+  </url>
+  
+  <url>
+    <loc>https://adamhaber.github.io/talk/</loc>
+  </url>
+  
+</urlset>

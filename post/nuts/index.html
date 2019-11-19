@@ -1,0 +1,1899 @@
+<!DOCTYPE html>
+<html lang="en-us">
+
+<head>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="generator" content="Source Themes Academic 4.6.0">
+
+  
+
+  
+  
+  
+  
+  
+    
+    
+    
+  
+  
+
+  <meta name="author" content="Adam Haber">
+
+  
+  
+  
+    
+  
+  <meta name="description" content="TL;DR We&rsquo;ll:
+ Port a great Bayesian modelling tutorial from Stan to TFP Discuss how to speed up our sampling function Use the trace_fn to produce Stan-like generated quantities Explore the results using the ArviZ library.  Intro This is a TFP-port one of of the best Bayesian modelling tutorials I&rsquo;ve seen online - the Model building and expansion for golf putting Stan tutorial. It&rsquo;s a beautiful example of modeling from first principles, and why the incorporation of domain knowledge into a statistical model - in this case, knowing a little bit about golf and some high-school physics - is so important.">
+
+  
+  <link rel="alternate" hreflang="en-us" href="https://adamhaber.github.io/post/nuts/">
+
+  
+
+
+  
+  
+  
+  <meta name="theme-color" content="#2962ff">
+  
+
+  
+  
+  
+  
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/academicons/1.8.6/css/academicons.min.css" integrity="sha256-uFVgMKfistnJAfoCUQigIl+JfUaP47GrRKjf6CTPVmw=" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/all.min.css" integrity="sha256-+N4/V/SbAFiW1MPBCXnfnP9QSN3+Keu+NlB+0ev/YKQ=" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css" integrity="sha256-Vzbj7sDDS/woiFS3uNKo8eIuni59rjyNGtXfstRzStA=" crossorigin="anonymous">
+
+    
+    
+    
+      
+    
+    
+      
+      
+        
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/styles/github.min.css" crossorigin="anonymous" title="hl-light">
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/styles/dracula.min.css" crossorigin="anonymous" title="hl-dark" disabled>
+        
+      
+    
+
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.5.1/leaflet.css" integrity="sha256-SHMGCYmST46SoyGgo4YR/9AlK1vf3ff84Aq9yK4hdqM=" crossorigin="anonymous">
+    
+
+    
+
+  
+
+  
+  
+  
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Montserrat:400,700%7CRoboto:400,400italic,700%7CRoboto+Mono&display=swap">
+  
+
+  
+  
+  
+  
+  <link rel="stylesheet" href="/css/academic.css">
+
+  
+
+
+
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-143367176-1"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag() {
+      dataLayer.push(arguments);
+  }
+
+  function trackOutboundLink(url) {
+    gtag('event', 'click', {
+         'event_category': 'outbound',
+         'event_label': url,
+         'transport_type': 'beacon',
+         'event_callback': function () {
+           document.location = url;
+         }
+    });
+    console.debug("Outbound link clicked: " + url);
+  }
+
+  function onClickCallback(event) {
+    if ((event.target.tagName !== 'A') || (event.target.host === window.location.host)) {
+      return;
+    }
+    trackOutboundLink(event.target);  
+  }
+
+  gtag('js', new Date());
+  gtag('config', 'UA-143367176-1', {});
+
+  
+  document.addEventListener('click', onClickCallback, false);
+</script>
+
+
+  
+
+
+  
+
+  <link rel="manifest" href="/index.webmanifest">
+  <link rel="icon" type="image/png" href="/img/icon-32.png">
+  <link rel="apple-touch-icon" type="image/png" href="/img/icon-192.png">
+
+  <link rel="canonical" href="https://adamhaber.github.io/post/nuts/">
+
+  
+  
+  
+  
+    
+    
+  
+  
+  <meta property="twitter:card" content="summary">
+  
+  <meta property="twitter:site" content="@_adam_haber">
+  <meta property="twitter:creator" content="@_adam_haber">
+  
+  <meta property="og:site_name" content="Adam Haber">
+  <meta property="og:url" content="https://adamhaber.github.io/post/nuts/">
+  <meta property="og:title" content="Bayesian golf puttings, NUTS, and optimizing your sampling function with TensorFlow Probability | Adam Haber">
+  <meta property="og:description" content="TL;DR We&rsquo;ll:
+ Port a great Bayesian modelling tutorial from Stan to TFP Discuss how to speed up our sampling function Use the trace_fn to produce Stan-like generated quantities Explore the results using the ArviZ library.  Intro This is a TFP-port one of of the best Bayesian modelling tutorials I&rsquo;ve seen online - the Model building and expansion for golf putting Stan tutorial. It&rsquo;s a beautiful example of modeling from first principles, and why the incorporation of domain knowledge into a statistical model - in this case, knowing a little bit about golf and some high-school physics - is so important."><meta property="og:image" content="https://adamhaber.github.io/img/icon-192.png">
+  <meta property="twitter:image" content="https://adamhaber.github.io/img/icon-192.png"><meta property="og:locale" content="en-us">
+  
+    
+      <meta property="article:published_time" content="2019-10-21T00:00:00&#43;00:00">
+    
+    <meta property="article:modified_time" content="2019-10-21T00:00:00&#43;00:00">
+  
+
+  
+
+
+    
+
+
+
+
+
+
+  
+
+
+
+
+
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://adamhaber.github.io/post/nuts/"
+  },
+  "headline": "Bayesian golf puttings, NUTS, and optimizing your sampling function with TensorFlow Probability",
+  
+  "datePublished": "2019-10-21T00:00:00Z",
+  "dateModified": "2019-10-21T00:00:00Z",
+  
+  "author": {
+    "@type": "Person",
+    "name": "Adam Haber"
+  },
+  
+  "publisher": {
+    "@type": "Organization",
+    "name": "Adam Haber",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://adamhaber.github.io/img/icon-512.png"
+    }
+  },
+  "description": "TL;DR We\u0026rsquo;ll:\n Port a great Bayesian modelling tutorial from Stan to TFP Discuss how to speed up our sampling function Use the trace_fn to produce Stan-like generated quantities Explore the results using the ArviZ library.  Intro This is a TFP-port one of of the best Bayesian modelling tutorials I\u0026rsquo;ve seen online - the Model building and expansion for golf putting Stan tutorial. It\u0026rsquo;s a beautiful example of modeling from first principles, and why the incorporation of domain knowledge into a statistical model - in this case, knowing a little bit about golf and some high-school physics - is so important."
+}
+</script>
+
+  
+
+  
+
+
+  
+
+
+  
+
+
+
+
+
+  <title>Bayesian golf puttings, NUTS, and optimizing your sampling function with TensorFlow Probability | Adam Haber</title>
+
+</head>
+
+<body id="top" data-spy="scroll" data-offset="70" data-target="#TableOfContents" >
+
+  <aside class="search-results" id="search">
+  <div class="container">
+    <section class="search-header">
+
+      <div class="row no-gutters justify-content-between mb-3">
+        <div class="col-6">
+          <h1>Search</h1>
+        </div>
+        <div class="col-6 col-search-close">
+          <a class="js-search" href="#"><i class="fas fa-times-circle text-muted" aria-hidden="true"></i></a>
+        </div>
+      </div>
+
+      <div id="search-box">
+        
+        <input name="q" id="search-query" placeholder="Search..." autocapitalize="off"
+        autocomplete="off" autocorrect="off" spellcheck="false" type="search">
+        
+      </div>
+
+    </section>
+    <section class="section-search-results">
+
+      <div id="search-hits">
+        
+      </div>
+
+    </section>
+  </div>
+</aside>
+
+
+  
+<nav class="navbar navbar-expand-lg navbar-light compensate-for-scrollbar" id="navbar-main">
+  <div class="container">
+
+    
+    
+    
+      <a class="navbar-brand" href="/">Adam Haber</a>
+    
+
+    
+    <button type="button" class="navbar-toggler" data-toggle="collapse"
+            data-target="#navbar-content" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
+    <span><i class="fas fa-bars"></i></span>
+    </button>
+    
+
+    
+    
+    <div class="navbar-collapse main-menu-item collapse justify-content-start" id="navbar-content">
+
+      
+      <ul class="navbar-nav d-md-inline-flex">
+        
+
+        
+
+        
+        
+        
+          
+        
+
+        
+        
+        
+        
+        
+        
+          
+          
+          
+            
+          
+          
+        
+
+        <li class="nav-item">
+          <a class="nav-link " href="/#posts"><span>Posts</span></a>
+        </li>
+
+        
+        
+
+        
+
+        
+        
+        
+          
+        
+
+        
+        
+        
+        
+        
+        
+          
+          
+          
+            
+          
+          
+        
+
+        <li class="nav-item">
+          <a class="nav-link " href="/#about"><span>About</span></a>
+        </li>
+
+        
+        
+
+        
+
+        
+        
+        
+          
+        
+
+        
+        
+        
+        
+        
+        
+          
+          
+          
+            
+          
+          
+        
+
+        <li class="nav-item">
+          <a class="nav-link " href="/#contact"><span>Contact</span></a>
+        </li>
+
+        
+        
+
+      
+
+        
+      </ul>
+    </div>
+
+    <ul class="nav-icons navbar-nav flex-row ml-auto d-flex pl-md-2">
+      
+      <li class="nav-item">
+        <a class="nav-link js-search" href="#"><i class="fas fa-search" aria-hidden="true"></i></a>
+      </li>
+      
+
+      
+      <li class="nav-item">
+        <a class="nav-link js-dark-toggle" href="#"><i class="fas fa-moon" aria-hidden="true"></i></a>
+      </li>
+      
+
+      
+
+    </ul>
+
+  </div>
+</nav>
+
+
+  <article class="article">
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="article-container pt-3">
+  <h1>Bayesian golf puttings, NUTS, and optimizing your sampling function with TensorFlow Probability</h1>
+
+  
+
+  
+  
+
+
+<div class="article-metadata">
+
+  
+  
+
+  
+  <span class="article-date">
+    
+    
+      
+    
+    Oct 21, 2019
+  </span>
+  
+
+  
+
+  
+  <span class="middot-divider"></span>
+  <span class="article-reading-time">
+    18 min read
+  </span>
+  
+
+  
+  
+  
+
+  
+  
+
+</div>
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+</div>
+
+
+
+  <div class="article-container">
+
+    <div class="article-style">
+      
+
+<h2 id="tl-dr">TL;DR</h2>
+
+<p>We&rsquo;ll:</p>
+
+<ul>
+<li>Port a great Bayesian modelling tutorial from Stan to TFP</li>
+<li>Discuss how to speed up our sampling function</li>
+<li>Use the <code>trace_fn</code> to produce Stan-like <code>generated quantities</code></li>
+<li>Explore the results using the ArviZ library.</li>
+</ul>
+
+<h1 id="intro">Intro</h1>
+
+<p>This is a TFP-port one of of the best Bayesian modelling tutorials I&rsquo;ve seen online - the <a href="https://mc-stan.org/users/documentation/case-studies/golf.html" target="_blank">Model building and expansion for golf putting</a> Stan tutorial. It&rsquo;s a beautiful example of modeling from first principles, and why the incorporation of domain knowledge into a statistical model - in this case, knowing a little bit about golf and some high-school physics - is so important. Since there&rsquo;s no chance I&rsquo;ll explain the subject nearly as well as Gelman, go read his tutorial and come back if you want to learn how to do this with TFP. :-)</p>
+
+<p>Other than the actual TFP code for the different models, this post will also shortly discuss the new NUTS kernel, various optimizations techniques to make sampling (much) faster, how to use <code>trace_fn</code> to produce Stan-style generated quantities, and the ArviZ plotting library for inspecting sampler traces and statistics. I&rsquo;m not an expert on any of these topics - I&rsquo;ll share what I&rsquo;ve learned while trying to implement these models, and provide links for further reading.</p>
+
+<p>If you&rsquo;re more into basketball than golf, you might be interested in <a href="https://jamesblandecon.github.io/NBAJumpShotsIndividual.html" target="_blank">this</a> case-study; it&rsquo;s based on the golf tutorial, but analyzes NBA jump shots instead.</p>
+
+<pre><code class="language-python"># the necessary imports
+import tensorflow.compat.v2 as tf
+
+import tensorflow_probability as tfp
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt 
+import numpy as np
+from time import time
+from tensorflow_probability import distributions as tfd
+from tensorflow_probability import bijectors as tfb
+from functools import partial
+
+import arviz as az  #we'll get to that
+</code></pre>
+
+<pre><code class="language-python">sns.set_palette(&quot;muted&quot;)
+np.random.seed(1324)
+dtype=tf.float32
+params = {
+    'legend.fontsize': 'x-large',
+    'figure.figsize': (9, 6),
+    'axes.labelsize': 'x-large',
+    'axes.titlesize':'x-large',
+    'xtick.labelsize':'x-large',
+    'ytick.labelsize':'x-large'
+}
+plt.rcParams.update(params)
+%config InlineBackend.figure_format = 'retina'
+</code></pre>
+
+<h1 id="arviz">ArviZ</h1>
+
+<p>In the previous posts we&rsquo;ve been using <a href="https://seaborn.pydata.org" target="_blank">seaborn</a> for plotting. Seaborn is an amazing plotting library with good defaults and well-designed API, but it was not built with MCMC simulations in mind. <a href="https://arviz-devs.github.io/arviz/" target="_blank">ArviZ</a> was. ArviZ allows for &ldquo;Exploratory analysis of Bayesian models&rdquo;, and interfaces with many bayesian modeling libraries such as PyStan, PyMC3, Pyro, emcee and TFP. ArviZ prints nice dataframes with summary statistics, supports model comparison using LOO and WAIC (similar to the <a href="https://cran.r-project.org/web/packages/loo/loo.pdf" target="_blank">loo</a> package in R), and a wide variety of diagnosis tools; it&rsquo;s the most comprehensive Python package for this sort of analysis I&rsquo;ve seen, and it&rsquo;s maintained by top PyMC3 contributors.</p>
+
+<p>The only drawback for using ArviZ with TFP at the moment is that the <code>from_tfp</code> function has troubles with multi-chain traces (which are pretty much the norm); I adjusted a code snippet from <a href="https://colab.research.google.com/gist/junpenglao/51cd25c6372f8d2ab3490d4af8f97401/tfp_nuts_demo.ipynb" target="_blank">this</a> notebook and wrote a small helper function to handle this. The <code>tfp_trace_to_arviz</code> function gets a <code>StatesAndTrace</code> object, which is a container with two elements:</p>
+
+<ul>
+<li>a list of samples tensors (the actual output of the sampler).</li>
+<li>a list of trace statistics.</li>
+</ul>
+
+<p>&hellip; and returns an ArviZ <code>InferenceData</code> object. There is a wide range of statistics we can extract from our sampler, which are important for sampling diagnosis. This is the actual function:</p>
+
+<pre><code class="language-python"># using pymc3 naming conventions, with log_likelihood instead of lp so that ArviZ can compute loo and waic
+sample_stats_name = ['log_likelihood','tree_size','diverging','energy','mean_tree_accept']
+
+def tfp_trace_to_arviz(
+    tfp_trace,
+    var_names=None, 
+    sample_stats_name=sample_stats_name):
+    
+    samps, trace = tfp_trace
+    if var_names is None:
+        var_names = [&quot;var &quot; + str(x) for x in range(len(samps))]
+        
+    sample_stats = {k:v.numpy().T for k, v in zip(sample_stats_name, trace)}
+    posterior = {name : tf.transpose(samp, [1, 0, 2]).numpy() for name, samp in zip(var_names, samps)}
+    return az.from_dict(posterior=posterior, sample_stats=sample_stats)
+</code></pre>
+
+<p>The only tricky thing here is the <code>tf.transpose</code> operation - we&rsquo;re making sure the chain dimension is the first axis, to be consistent with ArviZ conventions (see <a href="https://github.com/arviz-devs/arviz/blob/24f8268844cf3cc5cf10d152e955c3122ec477c0/arviz/data/base.py#L103" target="_blank"><code>az.data.numpy_to_data_array</code></a>).</p>
+
+<h1 id="nuts">NUTS</h1>
+
+<p>Previous posts have used the Hamiltonian Monte Carlo sampler to sample from our posterior distributions. When I tried to use HMC to sample from the models described below (specifically, from the 3rd and 4th models) I&rsquo;ve had troubles reproducing the results from the Stan tutorial. I&rsquo;ve posted a question on the TFP google group (super responsive and helpful), and Junpeng Lao (PyMC3 core developer, now working on TFP) recommended I&rsquo;ll try the new NUTS kernel, instead. He said NUTS requires significantly less hand-tuning for complex models, compared to HMC; he was right.</p>
+
+<p>Since the posts so far were mostly code-oriented, we haven&rsquo;t really gotten into the HMC algorithm, so we&rsquo;re not going to get into why NUTS is an improvement; suffice to say it traverses the posterior distribution in a more efficient way, which is good for us (the simple people who don&rsquo;t know how to hand-tune the number of leapfrog steps). We&rsquo;ll see below another new addition to TFP that helps with another fine-tuning problem.</p>
+
+<p>For further reading, these are all excellent:</p>
+
+<ul>
+<li>The original <a href="http://jmlr.org/papers/volume15/hoffman14a/hoffman14a.pdf" target="_blank">NUTS</a> paper.</li>
+<li>Michael Betancourt&rsquo;s <a href="https://www.google.com/url?sa=t&amp;rct=j&amp;q=&amp;esrc=s&amp;source=web&amp;cd=2&amp;cad=rja&amp;uact=8&amp;ved=2ahUKEwisvufdvJflAhWl5OAKHctkBaYQFjABegQIAhAB&amp;url=https%3A%2F%2Farxiv.org%2Fabs%2F1701.02434&amp;usg=AOvVaw0KCc_YNSmoxjpHQOaZP2IN" target="_blank">A Conceptual Introduction to Hamiltonian Monte Carlo</a> paper.</li>
+<li>For the more code-oriented reader - Colin Carroll&rsquo;s excellent <a href="https://colindcarroll.com/2019/04/11/hamiltonian-monte-carlo-from-scratch/" target="_blank">series</a> of posts on HMC, tuning, etc. Colin is one of the maintainers of both ArviZ and PyMC3.</li>
+<li>Sigrid Keydana&rsquo;s <a href="https://blogs.rstudio.com/tensorflow/posts/2019-10-03-intro-to-hmc/" target="_blank">explanation</a> is also excellent and less intimidating than the original articles.</li>
+</ul>
+
+<p>I&rsquo;ll now go over the code we&rsquo;ll use to run the NUTS sampler. We&rsquo;ll start with explaining <code>trace_fn</code>, which is not NUTS specific but we&rsquo;ll use it in our <code>run_nuts</code> function; then we&rsquo;ll cover the <code>run_nuts</code> function itself.</p>
+
+<h2 id="tracing-sampler-statistics">Tracing sampler statistics</h2>
+
+<p>TFP allows us to collect various statistics of the sampling procedure, which can be important for diagnosing different kinds of problems with our model. To tell TFP which sampler statistics we actually care about, we need to pass <code>sample_chain</code> a mysterious looking function called <code>trace_fn</code>, which takes two arguments: <code>states</code>, and <code>previous_kernel_results</code> (or <code>pkr</code>; took me a while understand what this stands for). In most examples (e.g., in <code>sample_chain</code>&rsquo;s docs), the <code>states</code> argument is discarded and some field(s) of the <code>pkr</code> (which is a <code>collections.namedtuple</code> object) are returned. To see what are the different kinds of statistics you can extract from <code>previous_kernel_results</code> for the NUTS sampler, see <a href="https://github.com/tensorflow/probability/blob/b959b26b7b3eee31711096d140b01cf58768e5e1/tensorflow_probability/python/mcmc/nuts.py#L73" target="_blank">here</a>.</p>
+
+<p>Following the same notebook linked above, we&rsquo;re extracting the following statistics (most of this came from this PyMC3 <a href="https://docs.pymc.io/notebooks/sampler-stats.html" target="_blank">Sampler Statistics</a> notebook):</p>
+
+<ul>
+<li><code>target_log_prob</code> - log likelihood of the current state. If you&rsquo;re interested in using ArviZ for model comparison, you need to extract this.</li>
+<li><code>leapfrogs_taken</code> - NUTS generates a binary tree during sampling; this is the number of leafs in the tree per iteration. If the tree size is large, this can imply there are strong correlations in the posterior, high curvature &ldquo;funnels&rdquo;, and that <a href="https://mc-stan.org/docs/2_18/stan-users-guide/reparameterization-section.html" target="_blank">reparameterization</a> of the model (for example, moving from a centered to non-centered representation) might be helpful.</li>
+<li><code>has_divergence</code> - Whether the trajectory for this sample diverged. See Michael Betancourt&rsquo;s excellent <a href="https://mc-stan.org/users/documentation/case-studies/divergences_and_bias.html" target="_blank">post</a> for what are divergences and how you can use them to detect problems with your model.</li>
+<li><code>energy</code> - The energy at the point in phase-space where the sample was accepted. Can be used to identify posteriors with problematically long tails. See <a href="https://discourse.pymc.io/t/about-nuts-sampling-and-energy-plot/831" target="_blank">here</a>.</li>
+
+<li><p><code>log_accept_ratio</code> - The mean acceptance probability for the tree that generated this sample. This can be compared to the desired target acceptance ratio for diagnosis.</p>
+
+<pre><code class="language-python">def trace_fn(_, pkr):  
+return (
+    pkr.inner_results.inner_results.target_log_prob,
+    pkr.inner_results.inner_results.leapfrogs_taken,
+    pkr.inner_results.inner_results.has_divergence,
+    pkr.inner_results.inner_results.energy,
+    pkr.inner_results.inner_results.log_accept_ratio
+)
+</code></pre></li>
+</ul>
+
+<p>The <code>pkr.inner_results.inner_results</code> part is due to the fact that we&rsquo;re using a kernel-within-a-kernel-within-a-kernel - see below.</p>
+
+<h2 id="calling-nuts">Calling NUTS</h2>
+
+<p>The code for running the NUTS sampler is somewhat different than the <code>sampleHMC</code> function we&rsquo;ve used in the previous posts. Here&rsquo;s a helper function for running NUTS that takes a tracing function, a log probability function, a list of initial values and an (optional) list of bijectors, and returns samples and sampler statistics.</p>
+
+<pre><code class="language-python">n_chains = 10
+
+def run_nuts_template(
+    trace_fn,
+    target_log_prob_fn,
+    inits,
+    bijectors_list=None, 
+    num_steps=500,
+    num_burnin=500,
+    n_chains=n_chains):
+    
+    step_size = np.random.rand(n_chains, 1)*.5 + 1.
+    
+    if not isinstance(inits, list):
+        inits = [inits]
+        
+    if bijectors_list is None:
+        bijectors_list = [tfb.Identity()]*len(inits)
+
+    kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
+        tfp.mcmc.TransformedTransitionKernel(
+            inner_kernel=tfp.mcmc.NoUTurnSampler(
+                target_log_prob_fn,
+                step_size=[step_size]*len(inits)
+            ),
+            bijector=bijectors_list
+        ),
+        target_accept_prob=.8,
+        num_adaptation_steps=int(0.8*num_burnin),
+        step_size_setter_fn=lambda pkr, new_step_size: pkr._replace(
+              inner_results=pkr.inner_results._replace(step_size=new_step_size)
+          ),
+        step_size_getter_fn=lambda pkr: pkr.inner_results.step_size,
+        log_accept_prob_getter_fn=lambda pkr: pkr.inner_results.log_accept_ratio,
+    )
+    
+    res = tfp.mcmc.sample_chain(
+        num_results=num_steps,
+        num_burnin_steps=num_burnin,
+        current_state=inits,
+        kernel=kernel,
+        trace_fn=trace_fn
+    )
+    return res
+</code></pre>
+
+<p>What have we got here?</p>
+
+<ul>
+<li>The <code>NUTS</code> kernel is hidden within the <code>TransformedTransitionKernel</code>, and gets as inputs the <code>target_log_prob_fn</code> function representing the model we want to sample from, and a list of per-variable <code>step_size</code> for the NUTS algorithm. TFP&rsquo;s docs recommend these should be of the same order-of-magnitude as the standard deviations of the target distribution; here they&rsquo;re taken to be of order 1, and jittered (this can apparently help with areas of high-curvature of the posterior - see the Stan manual on <a href="https://mc-stan.org/docs/2_18/reference-manual/hmc-algorithm-parameters.html" target="_blank">HMC parameters</a> for more details).</li>
+<li>A <code>TransformedTransitionKernel</code> wraps <code>NUTS</code> in case we&rsquo;re using unconstraining bijectors. For a more in-depth explanation on bijectors, see my previous <a href="https://adamhaber.github.io/2019/09/02/Varying-Slopes-Models-and-the-CholeskyLKJ-Distribution-in-TensorFlow-Probability.html" target="_blank">post</a>. If no bijectors are passed, we&rsquo;re using Identity bijectors.</li>
+<li>This is wrapped by <code>tfp.mcmc.DualAveragingStepSizeAdaptation</code>, which, as the name suggests, adapts the sampler step size in order to make sampling more efficient. This is the 2nd addition that saves hand-tuning I&rsquo;ve mentioned above. We&rsquo;re setting the number of adaptation steps to be 80% of the number of burnin step, following TFP&rsquo;s <a href="https://github.com/tensorflow/probability/blob/b959b26b7b3eee31711096d140b01cf58768e5e1/tensorflow_probability/python/mcmc/dual_averaging_step_size_adaptation.py#L113" target="_blank">recommendation</a>.</li>
+</ul>
+
+<p>The whole kernel-within-kernel-within-kernel is passed to <code>sample_chain</code>, along with initial values, the trace function from above, number of burnin steps and number of results.</p>
+
+<h2 id="speeding-up-your-sampler-with-xla-compilation">Speeding up your sampler with XLA compilation</h2>
+
+<p>We can call <code>run_nuts</code> as it is and everything will work fine. However, we can use some TFP optimisation tricks to make sampling <em>significantly</em> faster. Optimizing the sampling function is a one liner:</p>
+
+<pre><code class="language-python">run_nuts = partial(run_nuts_template, trace_fn)
+
+run_nuts_opt = tf.function(run_nuts)
+run_nuts_defun = tf.function(run_nuts, autograph=False)
+</code></pre>
+
+<p>What&rsquo;s this?</p>
+
+<ul>
+<li>We&rsquo;re using <code>functools.partial</code> to &ldquo;plug in&rdquo; the tracing function. This simply saves writing <code>run_nuts</code> several times for several tracing functions.</li>
+<li>Decorating the <code>run_nuts</code> function with <code>tf.function</code> compiles it into a <code>tf.Graph</code>, which means faster execution and easy integration with the GPU or TPU. This is done by tracing the TensorFlow operations in <code>run_nuts</code> and constructing the corresponding <code>tf.Graph</code>, allowing TensorFlow to optimize and exploit parallelism in the computation defined by <code>run_nuts</code>. See <a href="https://www.tensorflow.org/guide/function" target="_blank">here</a> and <a href="https://www.tensorflow.org/api_docs/python/tf/function" target="_blank">here</a> if you&rsquo;re interested in learning more.</li>
+<li>The <code>autograph=False</code> is related to how control-flow statements are handled; setting it to <code>False</code> is the recommendation of the TFP team (we&rsquo;ll benchmark all these below).</li>
+</ul>
+
+<p>We can even have a faster version:</p>
+
+<pre><code class="language-python">run_nuts_defun_xla = tf.function(run_nuts, autograph=False, experimental_compile=True)
+</code></pre>
+
+<p><code>experimental_compile=True</code> compiles the whole graph into XLA, which is even faster, as we&rsquo;ll see below. XLA is a domain-specific compiler used by TensorFlow (and jax) to produce highly optimized code and CPU/GPU/TPU compatibility. For learning more about XLA compilation, read <a href="https://www.tensorflow.org/xla" target="_blank">this</a> and watch the talk at the bottom of the page.</p>
+
+<h1 id="data">Data</h1>
+
+<p>There are two datasets in the original Stan tutorial - we call them <code>data</code> and <code>new_data</code>. The first column is the distance (<code>x</code>) from the hole, the second column is the number of attempts, and the last column is the number of successful putts:</p>
+
+<pre><code class="language-python">data = np.array([[2,1443,1346],
+[3,694,577],
+[4,455,337],
+[5,353,208],
+[6,272,149],
+[7,256,136],
+[8,240,111],
+[9,217,69],
+[10,200,67],
+[11,237,75],
+[12,202,52],
+[13,192,46],
+[14,174,54],
+[15,167,28],
+[16,201,27],
+[17,195,31],
+[18,191,33],
+[19,147,20],
+[20,152,24]])
+
+new_data = np.array([[0.28, 45198, 45183],
+[0.97, 183020, 182899],
+[1.93, 169503, 168594],
+[2.92, 113094, 108953],
+[3.93, 73855, 64740],
+[4.94, 53659, 41106],
+[5.94, 42991, 28205],
+[6.95, 37050, 21334],
+[7.95, 33275, 16615],
+[8.95, 30836, 13503],
+[9.95, 28637, 11060],
+[10.95, 26239, 9032],
+[11.95, 24636, 7687],
+[12.95, 22876, 6432],
+[14.43, 41267, 9813],
+[16.43, 35712, 7196],
+[18.44, 31573, 5290],
+[20.44, 28280, 4086],
+[21.95, 13238, 1642],
+[24.39, 46570, 4767],
+[28.40, 38422, 2980],
+[32.39, 31641, 1996],
+[36.39, 25604, 1327],
+[40.37, 20366, 834],
+[44.38, 15977, 559],
+[48.37, 11770, 311],
+[52.36, 8708, 231],
+[57.25, 8878, 204],
+[63.23, 5492, 103],
+[69.18, 3087, 35],
+[75.19, 1742, 24]])
+
+df = pd.DataFrame(data, columns = ['x','n','y'])
+new_df = pd.DataFrame(new_data, columns = ['x','n','y'])
+</code></pre>
+
+<p>This is how the data looks like:</p>
+
+<pre><code class="language-python">plt.scatter(df['x'],df['y']/df['n'],c='b',label='data')
+plt.scatter(new_df['x'],new_df['y']/new_df['n'],c='r',label='new_data')
+plt.legend()
+plt.xlabel(&quot;Distance&quot;)
+plt.ylabel(&quot;% of success&quot;)
+plt.title(&quot;Original data&quot;);
+</code></pre>
+
+<p><img src="output_28_0.png" alt="png" /></p>
+
+<h1 id="model-1">Model 1</h1>
+
+<p>The first model is a simple logistic regression. Since the graph above is somewhat skewed and not symmetric around its midpoint (like a sigmoid), you can already guess logistic regression won&rsquo;t be very accurate but why not:</p>
+
+<pre><code class="language-python">root = tfd.JointDistributionCoroutine.Root
+
+def golf_logistic():
+    a = yield root(tfd.Sample(tfd.Normal(0,1e6),1))
+    b = yield root(tfd.Sample(tfd.Normal(0,1e6),1))
+    y = yield tfd.Independent(
+        tfd.Binomial(
+            total_count = tf.cast(df['n'],dtype),
+            logits = a+tf.cast(df['x'],dtype)*b
+        )
+    )
+</code></pre>
+
+<pre><code class="language-python">golf_logistic_jd = tfd.JointDistributionCoroutine(golf_logistic)
+</code></pre>
+
+<p>Note that unlike the Stan tutorial, we&rsquo;re using a super-vague but proper prior $\mathcal{N}\left(0,10^6\right)$.</p>
+
+<p>We&rsquo;ll use <code>tfd.JointDistributionCoroutine</code> to build all 4 models in this post. <code>JointDistributionCoroutine</code> is a cousin of the more-intuitive <code>JointDistributionSequential</code> we&rsquo;ve used in previous posts. Instead of a list of <code>tfd.Distribution</code>-like instances, we&rsquo;re passing a generator that yields a sequence of <code>tfd.Distribution</code>-like instances. The main advantage is that with <code>Coroutine</code>&rsquo;s function syntax its easier to express intermediate calculations, compared to <code>Sequential</code>&rsquo;s list syntax. This will come in handy already in the 2nd model.</p>
+
+<p>The main differences are that we need to use <code>yield</code> everytime we&rsquo;re sampling from a distribution, and wrap priors (random variables in the model that don&rsquo;t depend on other random variables) with <code>root</code>.</p>
+
+<p>Once we have our model, we feed its <code>log_prob</code> method together with the observed data into <code>run_nuts</code>.</p>
+
+<pre><code class="language-python">golf_logistic_log_prob = lambda *args: golf_logistic_jd.log_prob(args + (tf.cast(df['y'],dtype),))
+</code></pre>
+
+<p>Let&rsquo;s see how each of the <code>run_nuts</code> version is doing:</p>
+
+<pre><code class="language-python">%%time
+res = run_nuts(golf_logistic_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1))])
+</code></pre>
+
+<pre><code>CPU times: user 13min 5s, sys: 4.28 s, total: 13min 10s
+Wall time: 13min 13s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_opt(golf_logistic_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1))])
+</code></pre>
+
+<pre><code>CPU times: user 29.7 s, sys: 4.13 s, total: 33.8 s
+Wall time: 18.7 s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_defun(golf_logistic_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1))])
+</code></pre>
+
+<pre><code>CPU times: user 29 s, sys: 4.04 s, total: 33 s
+Wall time: 17.9 s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_defun_xla(golf_logistic_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1))])
+</code></pre>
+
+<pre><code>CPU times: user 6.29 s, sys: 77.9 ms, total: 6.37 s
+Wall time: 6.39 s
+</code></pre>
+
+<p>So <code>tf.function</code> makes a <em>huge</em> difference, <code>autograph</code> True/False doesn&rsquo;t really matter here, and XLA definitely helps.</p>
+
+<p>Visualizing the results with ArviZ is now straightforward:</p>
+
+<pre><code class="language-python">trace1 = tfp_trace_to_arviz(res,['a','b'])
+</code></pre>
+
+<pre><code class="language-python">az.plot_trace(trace1);
+</code></pre>
+
+<p><img src="output_42_0.png" alt="png" /></p>
+
+<p>And so is displaying summary statistics:</p>
+
+<pre><code class="language-python">az.summary(trace1)
+</code></pre>
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>mean</th>
+      <th>sd</th>
+      <th>hpd_3%</th>
+      <th>hpd_97%</th>
+      <th>mcse_mean</th>
+      <th>mcse_sd</th>
+      <th>ess_mean</th>
+      <th>ess_sd</th>
+      <th>ess_bulk</th>
+      <th>ess_tail</th>
+      <th>r_hat</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>a[0]</th>
+      <td>2.231</td>
+      <td>0.061</td>
+      <td>2.115</td>
+      <td>2.346</td>
+      <td>0.002</td>
+      <td>0.001</td>
+      <td>1017.0</td>
+      <td>1016.0</td>
+      <td>1030.0</td>
+      <td>833.0</td>
+      <td>1.01</td>
+    </tr>
+    <tr>
+      <th>b[0]</th>
+      <td>-0.256</td>
+      <td>0.007</td>
+      <td>-0.269</td>
+      <td>-0.243</td>
+      <td>0.000</td>
+      <td>0.000</td>
+      <td>1294.0</td>
+      <td>1293.0</td>
+      <td>1297.0</td>
+      <td>1320.0</td>
+      <td>1.01</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>Let&rsquo;s see how this logistic regression looks like when we use the mean parameters:</p>
+
+<pre><code class="language-python">a,b = az.summary(trace1)['mean']
+plt.plot(df['x'], [np.exp(x)/(1+np.exp(x)) for x in a+df['x']*b],c='r',label='model 1') 
+plt.scatter(df['x'], df['y']/df['n'],label='data') 
+plt.legend();
+</code></pre>
+
+<p><img src="output_46_0.png" alt="png" /></p>
+
+<h1 id="model-2">Model 2</h1>
+
+<p>Logistic regression is a good start, but we can see it&rsquo;s not doing a very good job at fitting our data. The second model is a major improvement, incorporating the knowledge that this data is describing attempts to insert a small ball into a larger hole; therefore their sizes, the distance between them and the corresponding angles probably matter.</p>
+
+<pre><code class="language-python">r = (1.68/2)/12 #ball size
+R = (4.25/2)/12 #hole size
+
+#threshold angles
+df['th_angle'] = np.arcsin((R-r)/df['x'])          
+new_df['th_angle'] = np.arcsin((R-r)/new_df['x'])
+</code></pre>
+
+<pre><code class="language-python">normal_cdf = tfb.NormalCDF()
+</code></pre>
+
+<pre><code class="language-python">def golf_angle_distance():
+    # priors
+    sigma = yield root(tfd.Sample(tfd.HalfNormal(1e6),1))
+    
+    # transformations
+    phi = 2*normal_cdf.forward(
+        tf.cast(df['th_angle'],dtype)/sigma
+    )-1
+    
+    # likelihood
+    y = yield tfd.Independent(
+        tfd.Binomial(
+            tf.cast(df['n'],dtype),
+            probs=phi
+        )
+    )
+
+golf_angle_distance_jd = tfd.JointDistributionCoroutine(golf_angle_distance)
+golf_angle_distance_jd_log_prob = lambda *args: golf_angle_distance_jd.log_prob(
+    args + (tf.cast(df['y'], dtype),)
+)
+</code></pre>
+
+<p>Note that something like <code>phi</code> would be difficult to express with <code>Sequential</code>, but straightforward with <code>Coroutine</code>.</p>
+
+<p>We&rsquo;ll use this model as an opportunity to do something different with our <code>trace_fn</code>. Stan has this super useful <code>generated quantities</code> block, in which we can use the sampled parameters to generated various kinds of quantities of interest. We&rsquo;ve mentioned above that <code>trace_fn</code> takes a <code>state</code> and a <code>pkr</code>, and usually discards the first. We&rsquo;ll now modify our <code>trace_fn</code> so that in each step it takes the current angle (in radians) and converts it to degrees:</p>
+
+<pre><code class="language-python">def trace_fn_angles(current_state, pkr):  
+    return (
+        tf.squeeze(current_state[0]*180/np.pi),
+        pkr.inner_results.inner_results.target_log_prob,
+        pkr.inner_results.inner_results.leapfrogs_taken,
+        pkr.inner_results.inner_results.has_divergence,
+        pkr.inner_results.inner_results.energy,
+        pkr.inner_results.inner_results.log_accept_ratio
+    )
+</code></pre>
+
+<p>We&rsquo;re taking the current state, representing the angle in radians, and convert it to degrees. The <code>tf.squeeze</code> is here to get rid of a redundant dimension that can cause broadcasting issues later.</p>
+
+<p>As for timing - the non <code>tf.function</code>-ed version is so slow that we won&rsquo;t even try. Let&rsquo;s compare the other alternatives:</p>
+
+<pre><code class="language-python">run_nuts_angle = partial(run_nuts_template, trace_fn_angles)
+
+run_nuts_opt_angle = tf.function(run_nuts_angle)
+run_nuts_defun_angle = tf.function(run_nuts_angle, autograph=False)
+run_nuts_defun_xla_angle = tf.function(run_nuts_angle, autograph=False, experimental_compile=True)
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_opt_angle(golf_angle_distance_jd_log_prob, [tf.ones((n_chains,1))], [tfb.Exp()])
+</code></pre>
+
+<pre><code>CPU times: user 6.18 s, sys: 808 ms, total: 6.99 s
+Wall time: 3.96 s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_defun_angle(golf_angle_distance_jd_log_prob, [tf.ones((n_chains,1))], [tfb.Exp()])
+</code></pre>
+
+<pre><code>CPU times: user 6.06 s, sys: 755 ms, total: 6.82 s
+Wall time: 3.93 s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_defun_xla_angle(golf_angle_distance_jd_log_prob, [tf.ones((n_chains,1))], [tfb.Exp()])
+</code></pre>
+
+<pre><code>CPU times: user 5.29 s, sys: 59.1 ms, total: 5.35 s
+Wall time: 5.38 s
+</code></pre>
+
+<p>No clear winner this time. Let&rsquo;s inspect the trace:</p>
+
+<pre><code class="language-python">trace2 = tfp_trace_to_arviz(res,['sigma'],
+                            sample_stats_name=['angle']+sample_stats_name)
+az.plot_trace(trace2);
+</code></pre>
+
+<p><img src="output_60_0.png" alt="png" /></p>
+
+<p>Since we traced the angles using <code>trace_fn_angles</code>, ArviZ treats it as another sample statistics - it&rsquo;s saved as an <code>xarray.DataArray</code> and even has its own plotting method:</p>
+
+<pre><code class="language-python">trace2.sample_stats.angle.plot.hist(bins=30);
+</code></pre>
+
+<p><img src="output_62_0.png" alt="png" /></p>
+
+<p>I found this nice and cleaner than <code>sns.distplot(res[0][0].numpy().flatten()*180/np.pi)</code>.</p>
+
+<p>We print the summary statistics and make sure we&rsquo;re reproducing the Stan tutorial results:</p>
+
+<pre><code class="language-python">az.summary(trace2)
+</code></pre>
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>mean</th>
+      <th>sd</th>
+      <th>hpd_3%</th>
+      <th>hpd_97%</th>
+      <th>mcse_mean</th>
+      <th>mcse_sd</th>
+      <th>ess_mean</th>
+      <th>ess_sd</th>
+      <th>ess_bulk</th>
+      <th>ess_tail</th>
+      <th>r_hat</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>sigma[0]</th>
+      <td>0.027</td>
+      <td>0.0</td>
+      <td>0.026</td>
+      <td>0.027</td>
+      <td>0.0</td>
+      <td>0.0</td>
+      <td>2074.0</td>
+      <td>2073.0</td>
+      <td>2077.0</td>
+      <td>3648.0</td>
+      <td>1.0</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="comparing-models-1-2-with-arviz">Comparing models 1 &amp; 2 with ArviZ</h2>
+
+<p>ArviZ allows us to conduct model comparison using approximate Leave-One-Out cross validation and WAIC information criteria (read more <a href="https://mc-stan.org/loo/" target="_blank">here</a> if you&rsquo;re interested). To do so, our ArviZ objects must have a <code>log_likelihood</code> sampler stats field (this is why we&rsquo;ve included <code>target_log_prob</code> in our tracing function):</p>
+
+<pre><code class="language-python">trace1.sample_stats.log_likelihood.shape, trace2.sample_stats.log_likelihood.shape 
+</code></pre>
+
+<pre><code>((10, 500), (10, 500))
+</code></pre>
+
+<p>Model comparison is now as easy as:</p>
+
+<pre><code class="language-python">az.compare({'Model 1':trace1, 'Model 2':trace2})
+</code></pre>
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>rank</th>
+      <th>waic</th>
+      <th>p_waic</th>
+      <th>d_waic</th>
+      <th>weight</th>
+      <th>se</th>
+      <th>dse</th>
+      <th>warning</th>
+      <th>waic_scale</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>Model 2</th>
+      <td>0</td>
+      <td>203.973</td>
+      <td>0.521524</td>
+      <td>0</td>
+      <td>1</td>
+      <td>2.20886e-14</td>
+      <td>0</td>
+      <td>True</td>
+      <td>deviance</td>
+    </tr>
+    <tr>
+      <th>Model 1</th>
+      <td>1</td>
+      <td>424.486</td>
+      <td>1.12655</td>
+      <td>220.513</td>
+      <td>1.30697e-48</td>
+      <td>1.10443e-14</td>
+      <td>0</td>
+      <td>True</td>
+      <td>deviance</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>The models are ranked from best to worst, so Model 2 (not surprisingly) outperforms Model 1. For more info about model comparison, how to read this table and its visualization using <code>az.plot_compare</code>, see <a href="https://docs.pymc.io/notebooks/model_comparison.html" target="_blank">here</a>.</p>
+
+<h1 id="model-3">Model 3</h1>
+
+<p>The authors aren&rsquo;t satisfied with the fit of Model 2 and incorporate yet another piece of golf knowledge - other than shooting the ball at the right angle, you need to shoot it to the right distance, as well. They describe how this can be modelled, and proceed to fit the model:</p>
+
+<pre><code class="language-python">distance_tol = 3.
+overshot = 1.
+</code></pre>
+
+<pre><code class="language-python">def golf_angle_distance_2():
+    # priors
+    sigma_angle = yield root(tfd.Sample(tfd.HalfNormal(1),1))
+    sigma_distance = yield root(tfd.Sample(tfd.HalfNormal(1),1))
+
+    # transformations
+    p_angle = 2 * normal_cdf.forward(
+        tf.cast(new_df['th_angle'],dtype)/sigma_angle
+    )-1
+    
+    p_dist = normal_cdf.forward(
+        (distance_tol-overshot)/(tf.cast(new_df['x']+overshot,dtype)*sigma_distance)
+    ) - \
+    normal_cdf.forward(
+        (-overshot)/(tf.cast(new_df['x']+overshot,dtype)*sigma_distance)
+    )
+    
+    # likelihood
+    y = yield tfd.Independent(
+        tfd.Binomial(
+            tf.cast(new_df['n'],dtype),
+            probs=p_angle*p_dist
+        )
+    )
+</code></pre>
+
+<pre><code class="language-python">golf_angle_distance_2_jd = tfd.JointDistributionCoroutine(golf_angle_distance_2)
+golf_angle_distance_2_jd_log_prob = lambda *args: golf_angle_distance_2_jd.log_prob(
+    args + (tf.cast(new_df['y'], dtype),)
+)
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_opt(golf_angle_distance_2_jd_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1))],
+                              bijectors_list=[tfb.Exp(), tfb.Exp()])
+</code></pre>
+
+<pre><code>CPU times: user 23min 51s, sys: 4min 30s, total: 28min 21s
+Wall time: 10min 13s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_defun(golf_angle_distance_2_jd_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1))],
+                              bijectors_list=[tfb.Exp(), tfb.Exp()])
+</code></pre>
+
+<pre><code>CPU times: user 18min 56s, sys: 3min 51s, total: 22min 48s
+Wall time: 8min 11s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_defun_xla(golf_angle_distance_2_jd_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1))],
+                              bijectors_list=[tfb.Exp(), tfb.Exp()])
+</code></pre>
+
+<pre><code>CPU times: user 1min 57s, sys: 38.1 s, total: 2min 35s
+Wall time: 1min 6s
+</code></pre>
+
+<p>Here, XLA makes ~8x difference in speed, which is incredible for an inherently iterative process!</p>
+
+<p>As for the trace:</p>
+
+<pre><code class="language-python">trace3 = tfp_trace_to_arviz(res,['sigma_angle','sigma_distance'])
+az.plot_trace(trace3);
+</code></pre>
+
+<p><img src="output_80_1.png" alt="png" /></p>
+
+<p>This isn&rsquo;t what you want to see when inspecting a trace&hellip; The chains haven&rsquo;t mixed at all. Surprisingly, the Stan version had divergent transitions here, while we did not:</p>
+
+<pre><code class="language-python">trace3.sample_stats.diverging.sum()
+</code></pre>
+
+<pre><code>&lt;xarray.DataArray 'diverging' ()&gt;
+array(0)
+</code></pre>
+
+<h1 id="model-4">Model 4</h1>
+
+<p>In the 4th model, instead of using a binomial likelihood, we&rsquo;re using a normal approximation of the binomial distribution and adding an additional noise term (read the original for a more in-depth explanation):</p>
+
+<pre><code class="language-python">def golf_angle_distance_3(): 
+    # priors
+    sigma_angle = yield root(tfd.Sample(tfd.HalfNormal(1), 1))
+    sigma_distance = yield root(tfd.Sample(tfd.HalfNormal(1), 1))
+    sigma_y = yield root(tfd.Sample(tfd.HalfNormal(1), 1))
+    
+    # transformations
+    p_angle = 2 * normal_cdf.forward(
+      tf.cast(new_df['th_angle'],dtype)/sigma_angle
+    ) - 1
+    p_dist = normal_cdf.forward(
+      (distance_tol-overshot)/(tf.cast(new_df['x']+overshot,dtype)*sigma_distance)
+    ) - \
+    normal_cdf.forward(
+      (-overshot)/(tf.cast(new_df['x']+overshot,dtype)*sigma_distance)
+    )
+    p = p_dist*p_angle
+    
+    # likelihood
+    probs = yield tfd.Independent(
+        tfd.Normal(p, tf.sqrt(p*(1-p)/(tf.cast(new_df['n'],dtype))+sigma_y**2))
+    )
+</code></pre>
+
+<pre><code class="language-python">golf_angle_distance_3_jd = tfd.JointDistributionCoroutine(golf_angle_distance_3)
+
+golf_angle_distance_3_jd_log_prob = lambda *args: golf_angle_distance_3_jd.log_prob(
+    args + (tf.cast(new_df['y']/new_df['n'], dtype),)
+)
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_opt(golf_angle_distance_3_jd_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1)),tf.ones((n_chains,1))],
+                 bijectors_list=[tfb.Exp()]*3)
+</code></pre>
+
+<pre><code>CPU times: user 3min 45s, sys: 45.6 s, total: 4min 30s
+Wall time: 1min 39s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_defun(golf_angle_distance_3_jd_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1)),tf.ones((n_chains,1))],
+                 bijectors_list=[tfb.Exp()]*3)
+</code></pre>
+
+<pre><code>CPU times: user 4min 2s, sys: 48.4 s, total: 4min 50s
+Wall time: 1min 46s
+</code></pre>
+
+<pre><code class="language-python">%%time
+res = run_nuts_defun_xla(golf_angle_distance_3_jd_log_prob, [tf.ones((n_chains,1)), tf.ones((n_chains,1)),tf.ones((n_chains,1))],
+                 bijectors_list=[tfb.Exp()]*3)
+</code></pre>
+
+<pre><code>CPU times: user 15.8 s, sys: 177 ms, total: 16 s
+Wall time: 16.1 s
+</code></pre>
+
+<p>Again, XLA is simply an incredible speed up of the sampling function.</p>
+
+<pre><code class="language-python">trace4 = tfp_trace_to_arviz(res,['sigma_angle','sigma_distance','sigma_y'])
+az.plot_trace(trace4);
+</code></pre>
+
+<p><img src="output_91_0.png" alt="png" /></p>
+
+<p>This looks much better:</p>
+
+<pre><code class="language-python">az.summary(trace4)
+</code></pre>
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>mean</th>
+      <th>sd</th>
+      <th>hpd_3%</th>
+      <th>hpd_97%</th>
+      <th>mcse_mean</th>
+      <th>mcse_sd</th>
+      <th>ess_mean</th>
+      <th>ess_sd</th>
+      <th>ess_bulk</th>
+      <th>ess_tail</th>
+      <th>r_hat</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>sigma_angle[0]</th>
+      <td>0.018</td>
+      <td>0.000</td>
+      <td>0.018</td>
+      <td>0.018</td>
+      <td>0.0</td>
+      <td>0.0</td>
+      <td>3349.0</td>
+      <td>3348.0</td>
+      <td>3330.0</td>
+      <td>3283.0</td>
+      <td>1.00</td>
+    </tr>
+    <tr>
+      <th>sigma_distance[0]</th>
+      <td>0.080</td>
+      <td>0.001</td>
+      <td>0.078</td>
+      <td>0.083</td>
+      <td>0.0</td>
+      <td>0.0</td>
+      <td>3178.0</td>
+      <td>3169.0</td>
+      <td>3169.0</td>
+      <td>2313.0</td>
+      <td>1.00</td>
+    </tr>
+    <tr>
+      <th>sigma_y[0]</th>
+      <td>0.003</td>
+      <td>0.001</td>
+      <td>0.002</td>
+      <td>0.004</td>
+      <td>0.0</td>
+      <td>0.0</td>
+      <td>662.0</td>
+      <td>662.0</td>
+      <td>656.0</td>
+      <td>675.0</td>
+      <td>1.01</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>We&rsquo;ll extract the mean parameters from the summary, and plot the resulting function:</p>
+
+<pre><code class="language-python">mean_sigma_angle, mean_sigma_dist, mean_sigma_y = az.summary(trace4)['mean']
+</code></pre>
+
+<pre><code class="language-python">normal_cdf = tfb.NormalCDF()
+
+p_angle = 2 * normal_cdf.forward(
+    tf.cast(new_df['th_angle'],dtype)/mean_sigma_angle
+)-1
+
+p_dist = normal_cdf.forward(
+    (distance_tol-overshot)/(tf.cast(new_df['x']+overshot,dtype)*mean_sigma_dist)
+) - \
+normal_cdf.forward(
+    (-overshot)/(tf.cast(new_df['x']+overshot,dtype)*mean_sigma_dist)
+)
+mean_p = (p_dist*p_angle).numpy()
+std_p = (tf.sqrt(mean_p*(1-mean_p)/(tf.cast(new_df['n'],dtype))+mean_sigma_y**2)).numpy()
+</code></pre>
+
+<pre><code class="language-python">plt.scatter(new_df['x'],new_df['y']/new_df['n'],label='data')
+plt.errorbar(new_df['x'],mean_p,yerr=std_p,c='k',label='model 4')
+plt.legend();
+</code></pre>
+
+<p><img src="output_97_0.png" alt="png" /></p>
+
+<p>This is, by all means, a very impressive fit. And the errorbars are there, they&rsquo;re just too small we can&rsquo;t actually see them. Definitely not bad for a 3 parameters model.</p>
+
+<h1 id="comparison-summary">Comparison summary</h1>
+
+<p>This is a summary of the different timings:</p>
+
+<table>
+<thead>
+<tr>
+<th align="right"></th>
+<th align="right">Model 1</th>
+<th align="right">Model 2</th>
+<th align="right">Model 3</th>
+<th align="right">Model 4</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td align="right">without tf.function</td>
+<td align="right">793</td>
+<td align="right">-</td>
+<td align="right">-</td>
+<td align="right">-</td>
+</tr>
+
+<tr>
+<td align="right">tf.function, autograph=True</td>
+<td align="right">18.7</td>
+<td align="right">3.96</td>
+<td align="right">613</td>
+<td align="right">99</td>
+</tr>
+
+<tr>
+<td align="right">tf.function, autograph=False</td>
+<td align="right">17.9</td>
+<td align="right"><strong>3.93</strong></td>
+<td align="right">491</td>
+<td align="right">106</td>
+</tr>
+
+<tr>
+<td align="right">tf.function + XLA</td>
+<td align="right"><strong>6.39</strong></td>
+<td align="right">5.38</td>
+<td align="right"><strong>66</strong></td>
+<td align="right"><strong>16</strong></td>
+</tr>
+</tbody>
+</table>
+
+<p>So XLA compilation is a clear winner. Running the same models with 256 chains instead of 10 (very easy to do with TFP) gives qualitatively similar results.</p>
+
+<h1 id="wrapping-up">Wrapping up</h1>
+
+<p>In this post we&rsquo;ve tried to replicate Stan&rsquo;s awesome golf tutorial. Along the way, we saw how to work with the new NUTS kernel, how to speed it up using <code>tf.function</code> and XLA compilation, how to use the <code>trace_fn</code> to generated quantities of interest, and how to use ArviZ to handle all the plotting for us.</p>
+
+    </div>
+
+    
+
+
+
+
+
+<div class="article-tags">
+  
+  <a class="badge badge-light" href="/tags/tfp/">TFP</a>
+  
+  <a class="badge badge-light" href="/tags/bayesian-models/">Bayesian models</a>
+  
+  <a class="badge badge-light" href="/tags/nuts/">NUTS</a>
+  
+  <a class="badge badge-light" href="/tags/arviz/">ArviZ</a>
+  
+  <a class="badge badge-light" href="/tags/optimization/">optimization</a>
+  
+</div>
+
+
+
+<div class="share-box" aria-hidden="true">
+  <ul class="share">
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://twitter.com/intent/tweet?url=https://adamhaber.github.io/post/nuts/&amp;text=Bayesian%20golf%20puttings,%20NUTS,%20and%20optimizing%20your%20sampling%20function%20with%20TensorFlow%20Probability" target="_blank" rel="noopener" class="share-btn-twitter">
+          <i class="fab fa-twitter"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://www.facebook.com/sharer.php?u=https://adamhaber.github.io/post/nuts/&amp;t=Bayesian%20golf%20puttings,%20NUTS,%20and%20optimizing%20your%20sampling%20function%20with%20TensorFlow%20Probability" target="_blank" rel="noopener" class="share-btn-facebook">
+          <i class="fab fa-facebook"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="mailto:?subject=Bayesian%20golf%20puttings,%20NUTS,%20and%20optimizing%20your%20sampling%20function%20with%20TensorFlow%20Probability&amp;body=https://adamhaber.github.io/post/nuts/" target="_blank" rel="noopener" class="share-btn-email">
+          <i class="fas fa-envelope"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://www.linkedin.com/shareArticle?url=https://adamhaber.github.io/post/nuts/&amp;title=Bayesian%20golf%20puttings,%20NUTS,%20and%20optimizing%20your%20sampling%20function%20with%20TensorFlow%20Probability" target="_blank" rel="noopener" class="share-btn-linkedin">
+          <i class="fab fa-linkedin-in"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://web.whatsapp.com/send?text=Bayesian%20golf%20puttings,%20NUTS,%20and%20optimizing%20your%20sampling%20function%20with%20TensorFlow%20Probability%20https://adamhaber.github.io/post/nuts/" target="_blank" rel="noopener" class="share-btn-whatsapp">
+          <i class="fab fa-whatsapp"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://service.weibo.com/share/share.php?url=https://adamhaber.github.io/post/nuts/&amp;title=Bayesian%20golf%20puttings,%20NUTS,%20and%20optimizing%20your%20sampling%20function%20with%20TensorFlow%20Probability" target="_blank" rel="noopener" class="share-btn-weibo">
+          <i class="fab fa-weibo"></i>
+        </a>
+      </li>
+    
+  </ul>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+  
+  
+  
+    
+  
+  
+  <div class="media author-card content-widget-hr">
+    
+      
+      <img class="portrait mr-3" src="/authors/admin/avatar_hud138a96a47a9e2657537fb19ee618cb6_16021_250x250_fill_q90_lanczos_center.jpg" alt="Avatar">
+    
+
+    <div class="media-body">
+      <h5 class="card-title"><a href="https://adamhaber.github.io/">Adam Haber</a></h5>
+      <h6 class="card-subtitle">Computational Neuroscience PhD Student</h6>
+      <p class="card-text">Interested in probabilistic programming, computational statistics, statistical physics and programming languages.</p>
+      <ul class="network-icon" aria-hidden="true">
+  
+    
+    
+    
+      
+    
+    
+    
+    
+    
+      
+    
+    <li>
+      <a href="/#mailto:adamhaber@gmail.com" >
+        <i class="fas fa-envelope"></i>
+      </a>
+    </li>
+  
+    
+    
+    
+      
+    
+    
+    
+    
+    
+      
+    
+    <li>
+      <a href="https://twitter.com/_adam_haber" target="_blank" rel="noopener">
+        <i class="fab fa-twitter"></i>
+      </a>
+    </li>
+  
+    
+    
+    
+      
+    
+    
+    
+    
+    
+      
+    
+    <li>
+      <a href="https://github.com/adamhaber" target="_blank" rel="noopener">
+        <i class="fab fa-github"></i>
+      </a>
+    </li>
+  
+</ul>
+
+    </div>
+  </div>
+
+
+
+
+
+
+<script type="text/javascript"
+  src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+  </script>
+
+
+
+
+
+
+
+<div class="article-widget content-widget-hr">
+  <h3>Related</h3>
+  <ul>
+    
+    <li><a href="/post/survival-analysis/">Survival analysis, censoring and hacking the log_prob in TensorFlow Probability</a></li>
+    
+    <li><a href="/post/varying-slopes/">Varying Slopes Models and the CholeskyLKJ distribution in TensorFlow Probability</a></li>
+    
+    <li><a href="/post/varying-intercepts/">A Tutorial on Varying Intercepts Models with TensorFlow Probability</a></li>
+    
+  </ul>
+</div>
+
+
+
+  </div>
+</article>
+
+      
+
+    
+    
+    
+    <script src="/js/mathjax-config.js"></script>
+    
+
+    
+    
+    
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js" integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo=" crossorigin="anonymous"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.imagesloaded/4.1.4/imagesloaded.pkgd.min.js" integrity="sha256-lqvxZrPLtfffUl2G/e7szqSvPBILGbwmsGE1MKlOi0Q=" crossorigin="anonymous"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.isotope/3.0.6/isotope.pkgd.min.js" integrity="sha256-CBrpuqrMhXwcLLUd5tvQ4euBHCdh7wGlDfNz8vbu/iI=" crossorigin="anonymous"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js" integrity="sha256-yt2kYMy0w8AbtF89WXb2P1rfjcP/HTHLT7097U8Y5b8=" crossorigin="anonymous"></script>
+
+      
+
+      
+        
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/highlight.min.js" integrity="sha256-1zu+3BnLYV9LdiY85uXMzii3bdrkelyp37e0ZyTAQh0=" crossorigin="anonymous"></script>
+        
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/languages/r.min.js"></script>
+        
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/languages/python.min.js"></script>
+        
+      
+
+      
+      
+      <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" integrity="" crossorigin="anonymous" async></script>
+      
+    
+
+    
+    
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.5.1/leaflet.js" integrity="sha256-EErZamuLefUnbMBQbsEqu1USa+btR2oIlCpBJbyD4/g=" crossorigin="anonymous"></script>
+    
+
+    
+    
+    <script>hljs.initHighlightingOnLoad();</script>
+    
+
+    
+    
+    
+    
+    
+    
+    <script>
+      const search_config = {"indexURI":"/index.json","minLength":1,"threshold":0.3};
+      const i18n = {"no_results":"No results found","placeholder":"Search...","results":"results found"};
+      const content_type = {
+        'post': "Posts",
+        'project': "Projects",
+        'publication' : "Publications",
+        'talk' : "Talks"
+        };
+    </script>
+    
+
+    
+    
+
+    
+    
+    <script id="search-hit-fuse-template" type="text/x-template">
+      <div class="search-hit" id="summary-{{key}}">
+      <div class="search-hit-content">
+        <div class="search-hit-name">
+          <a href="{{relpermalink}}">{{title}}</a>
+          <div class="article-metadata search-hit-type">{{type}}</div>
+          <p class="search-hit-description">{{snippet}}</p>
+        </div>
+      </div>
+      </div>
+    </script>
+    
+
+    
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/3.2.1/fuse.min.js" integrity="sha256-VzgmKYmhsGNNN4Ph1kMW+BjoYJM2jV5i4IlFoeZA9XI=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mark.js/8.11.1/jquery.mark.min.js" integrity="sha256-4HLtjeVgH0eIB3aZ9mLYF6E8oU5chNdjU6p6rrXpl9U=" crossorigin="anonymous"></script>
+    
+
+    
+    
+
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+      
+    
+    
+    
+    
+    <script src="/js/academic.min.96cf4c3dc37ea60dbbd03c13a455f1f7.js"></script>
+
+    
+
+
+
+
+
+
+  
+  
+  <div class="container">
+    <footer class="site-footer">
+  
+
+  <p class="powered-by">
+    
+
+    Powered by the
+    <a href="https://sourcethemes.com/academic/" target="_blank" rel="noopener">Academic theme</a> for
+    <a href="https://gohugo.io" target="_blank" rel="noopener">Hugo</a>.
+
+    
+    <span class="float-right" aria-hidden="true">
+      <a href="#" class="back-to-top">
+        <span class="button_icon">
+          <i class="fas fa-chevron-up fa-2x"></i>
+        </span>
+      </a>
+    </span>
+    
+  </p>
+</footer>
+
+  </div>
+  
+
+  
+<div id="modal" class="modal fade" role="dialog">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Cite</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <pre><code class="tex hljs"></code></pre>
+      </div>
+      <div class="modal-footer">
+        <a class="btn btn-outline-primary my-1 js-copy-cite" href="#" target="_blank">
+          <i class="fas fa-copy"></i> Copy
+        </a>
+        <a class="btn btn-outline-primary my-1 js-download-cite" href="#" target="_blank">
+          <i class="fas fa-download"></i> Download
+        </a>
+        <div id="modal-error"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

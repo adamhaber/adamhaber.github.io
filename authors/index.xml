@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Authors | Adam Haber</title>
+    <link>https://adamhaber.github.io/authors/</link>
+      <atom:link href="https://adamhaber.github.io/authors/index.xml" rel="self" type="application/rss+xml" />
+    <description>Authors</description>
+    <generator>Source Themes Academic (https://sourcethemes.com/academic/)</generator><language>en-us</language>
+    <image>
+      <url>https://adamhaber.github.io/img/icon-192.png</url>
+      <title>Authors</title>
+      <link>https://adamhaber.github.io/authors/</link>
+    </image>
+    
+    <item>
+      <title></title>
+      <link>https://adamhaber.github.io/authors/admin/</link>
+      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
+      <guid>https://adamhaber.github.io/authors/admin/</guid>
+      <description>&lt;p&gt;I&amp;rsquo;m a PhD student at Weizmann Institute of Science, under the supervision of &lt;a href=&#34;https://www.google.com/url?sa=t&amp;amp;rct=j&amp;amp;q=&amp;amp;esrc=s&amp;amp;source=web&amp;amp;cd=1&amp;amp;cad=rja&amp;amp;uact=8&amp;amp;ved=2ahUKEwj-raqrr6rjAhVBZVAKHY7CAikQFjAAegQIBxAC&amp;amp;url=https%3A%2F%2Fwww.weizmann.ac.il%2Fneurobiology%2Flabs%2Fschneidman%2FThe_Schneidman_Lab%2FHome.html&amp;amp;usg=AOvVaw1vM2QWEK1RJwhgfDlbgn0u&#34; target=&#34;_blank&#34;&gt;Prof. Elad Schneidman&lt;/a&gt;. I have a BA in Physics and Mathematics from the Hebrew University. My work focuses on finding principles underlying structure-to-function relations in small neuronal networks. To address such questions, I combine simulation-based approaches with more information-theoretical tools and maximum entropy modelling.&lt;/p&gt;
+
+&lt;p&gt;I also work as a data scientist at &lt;a href=&#34;https://www.atidot.com&#34; target=&#34;_blank&#34;&gt;Atidot&lt;/a&gt;, mostly working on machine-learning approaches to actuarial challenges such as mortality risk assessment and churn prediction.&lt;/p&gt;
+
+&lt;p&gt;Besides my own research topics, I&amp;rsquo;m very interested in scientific computing in general, and probabilistic programming in particular. I constantly try to expand my knowledge in statistics and probability theory, mostly by following interesting people on Twitter (and refs within). I especially enjoy (but rarely truly understand) topics that lie at the intersection of statistics and geometry, such as information geometry and computational optimal transport.&lt;/p&gt;
+
+&lt;p&gt;I&amp;rsquo;m married to Inbar, and together we&amp;rsquo;re running a life-long longitudinal study on a pair of twins. I love hiking, rock climbing, eating, and dogs.&lt;/p&gt;
+</description>
+    </item>
+    
+  </channel>
+</rss>

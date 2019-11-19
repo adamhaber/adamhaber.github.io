@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en-us">
+
+<head>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="generator" content="Source Themes Academic 4.6.0">
+
+  
+
+  
+  
+  
+  
+  
+    
+    
+    
+  
+  
+
+  <meta name="author" content="Adam Haber">
+
+  
+  
+  
+    
+  
+  <meta name="description" content="TL;DR Survival analysis is a super useful technique for modelling time-to-event data; implementing a simple survival analysis using TFP requires hacking around the sampler log probability function; in this post we&rsquo;ll see how to do this, and introduce the basic terminology of survival analysis.
+Survival analysis 101 Survival analysis is an incredibly useful technique for modeling time-to-something data. &ldquo;something&rdquo; can be the death a patient (hence the name), the failure of some part in a machine, the churn of a customer, the fall of a regime, and tons of other problems.">
+
+  
+  <link rel="alternate" hreflang="en-us" href="https://adamhaber.github.io/post/survival-analysis/">
+
+  
+
+
+  
+  
+  
+  <meta name="theme-color" content="#2962ff">
+  
+
+  
+  
+  
+  
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/academicons/1.8.6/css/academicons.min.css" integrity="sha256-uFVgMKfistnJAfoCUQigIl+JfUaP47GrRKjf6CTPVmw=" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/all.min.css" integrity="sha256-+N4/V/SbAFiW1MPBCXnfnP9QSN3+Keu+NlB+0ev/YKQ=" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.css" integrity="sha256-Vzbj7sDDS/woiFS3uNKo8eIuni59rjyNGtXfstRzStA=" crossorigin="anonymous">
+
+    
+    
+    
+      
+    
+    
+      
+      
+        
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/styles/github.min.css" crossorigin="anonymous" title="hl-light">
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/styles/dracula.min.css" crossorigin="anonymous" title="hl-dark" disabled>
+        
+      
+    
+
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.5.1/leaflet.css" integrity="sha256-SHMGCYmST46SoyGgo4YR/9AlK1vf3ff84Aq9yK4hdqM=" crossorigin="anonymous">
+    
+
+    
+
+  
+
+  
+  
+  
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Montserrat:400,700%7CRoboto:400,400italic,700%7CRoboto+Mono&display=swap">
+  
+
+  
+  
+  
+  
+  <link rel="stylesheet" href="/css/academic.css">
+
+  
+
+
+
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-143367176-1"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag() {
+      dataLayer.push(arguments);
+  }
+
+  function trackOutboundLink(url) {
+    gtag('event', 'click', {
+         'event_category': 'outbound',
+         'event_label': url,
+         'transport_type': 'beacon',
+         'event_callback': function () {
+           document.location = url;
+         }
+    });
+    console.debug("Outbound link clicked: " + url);
+  }
+
+  function onClickCallback(event) {
+    if ((event.target.tagName !== 'A') || (event.target.host === window.location.host)) {
+      return;
+    }
+    trackOutboundLink(event.target);  
+  }
+
+  gtag('js', new Date());
+  gtag('config', 'UA-143367176-1', {});
+
+  
+  document.addEventListener('click', onClickCallback, false);
+</script>
+
+
+  
+
+
+  
+
+  <link rel="manifest" href="/index.webmanifest">
+  <link rel="icon" type="image/png" href="/img/icon-32.png">
+  <link rel="apple-touch-icon" type="image/png" href="/img/icon-192.png">
+
+  <link rel="canonical" href="https://adamhaber.github.io/post/survival-analysis/">
+
+  
+  
+  
+  
+    
+    
+  
+  
+  <meta property="twitter:card" content="summary">
+  
+  <meta property="twitter:site" content="@_adam_haber">
+  <meta property="twitter:creator" content="@_adam_haber">
+  
+  <meta property="og:site_name" content="Adam Haber">
+  <meta property="og:url" content="https://adamhaber.github.io/post/survival-analysis/">
+  <meta property="og:title" content="Survival analysis, censoring and hacking the log_prob in TensorFlow Probability | Adam Haber">
+  <meta property="og:description" content="TL;DR Survival analysis is a super useful technique for modelling time-to-event data; implementing a simple survival analysis using TFP requires hacking around the sampler log probability function; in this post we&rsquo;ll see how to do this, and introduce the basic terminology of survival analysis.
+Survival analysis 101 Survival analysis is an incredibly useful technique for modeling time-to-something data. &ldquo;something&rdquo; can be the death a patient (hence the name), the failure of some part in a machine, the churn of a customer, the fall of a regime, and tons of other problems."><meta property="og:image" content="https://adamhaber.github.io/img/icon-192.png">
+  <meta property="twitter:image" content="https://adamhaber.github.io/img/icon-192.png"><meta property="og:locale" content="en-us">
+  
+    
+      <meta property="article:published_time" content="2019-10-01T00:00:00&#43;00:00">
+    
+    <meta property="article:modified_time" content="2019-10-01T00:00:00&#43;00:00">
+  
+
+  
+
+
+    
+
+
+
+
+
+
+  
+
+
+
+
+
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://adamhaber.github.io/post/survival-analysis/"
+  },
+  "headline": "Survival analysis, censoring and hacking the log_prob in TensorFlow Probability",
+  
+  "datePublished": "2019-10-01T00:00:00Z",
+  "dateModified": "2019-10-01T00:00:00Z",
+  
+  "author": {
+    "@type": "Person",
+    "name": "Adam Haber"
+  },
+  
+  "publisher": {
+    "@type": "Organization",
+    "name": "Adam Haber",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://adamhaber.github.io/img/icon-512.png"
+    }
+  },
+  "description": "TL;DR Survival analysis is a super useful technique for modelling time-to-event data; implementing a simple survival analysis using TFP requires hacking around the sampler log probability function; in this post we\u0026rsquo;ll see how to do this, and introduce the basic terminology of survival analysis.\nSurvival analysis 101 Survival analysis is an incredibly useful technique for modeling time-to-something data. \u0026ldquo;something\u0026rdquo; can be the death a patient (hence the name), the failure of some part in a machine, the churn of a customer, the fall of a regime, and tons of other problems."
+}
+</script>
+
+  
+
+  
+
+
+  
+
+
+  
+
+
+
+
+
+  <title>Survival analysis, censoring and hacking the log_prob in TensorFlow Probability | Adam Haber</title>
+
+</head>
+
+<body id="top" data-spy="scroll" data-offset="70" data-target="#TableOfContents" >
+
+  <aside class="search-results" id="search">
+  <div class="container">
+    <section class="search-header">
+
+      <div class="row no-gutters justify-content-between mb-3">
+        <div class="col-6">
+          <h1>Search</h1>
+        </div>
+        <div class="col-6 col-search-close">
+          <a class="js-search" href="#"><i class="fas fa-times-circle text-muted" aria-hidden="true"></i></a>
+        </div>
+      </div>
+
+      <div id="search-box">
+        
+        <input name="q" id="search-query" placeholder="Search..." autocapitalize="off"
+        autocomplete="off" autocorrect="off" spellcheck="false" type="search">
+        
+      </div>
+
+    </section>
+    <section class="section-search-results">
+
+      <div id="search-hits">
+        
+      </div>
+
+    </section>
+  </div>
+</aside>
+
+
+  
+<nav class="navbar navbar-expand-lg navbar-light compensate-for-scrollbar" id="navbar-main">
+  <div class="container">
+
+    
+    
+    
+      <a class="navbar-brand" href="/">Adam Haber</a>
+    
+
+    
+    <button type="button" class="navbar-toggler" data-toggle="collapse"
+            data-target="#navbar-content" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
+    <span><i class="fas fa-bars"></i></span>
+    </button>
+    
+
+    
+    
+    <div class="navbar-collapse main-menu-item collapse justify-content-start" id="navbar-content">
+
+      
+      <ul class="navbar-nav d-md-inline-flex">
+        
+
+        
+
+        
+        
+        
+          
+        
+
+        
+        
+        
+        
+        
+        
+          
+          
+          
+            
+          
+          
+        
+
+        <li class="nav-item">
+          <a class="nav-link " href="/#posts"><span>Posts</span></a>
+        </li>
+
+        
+        
+
+        
+
+        
+        
+        
+          
+        
+
+        
+        
+        
+        
+        
+        
+          
+          
+          
+            
+          
+          
+        
+
+        <li class="nav-item">
+          <a class="nav-link " href="/#about"><span>About</span></a>
+        </li>
+
+        
+        
+
+        
+
+        
+        
+        
+          
+        
+
+        
+        
+        
+        
+        
+        
+          
+          
+          
+            
+          
+          
+        
+
+        <li class="nav-item">
+          <a class="nav-link " href="/#contact"><span>Contact</span></a>
+        </li>
+
+        
+        
+
+      
+
+        
+      </ul>
+    </div>
+
+    <ul class="nav-icons navbar-nav flex-row ml-auto d-flex pl-md-2">
+      
+      <li class="nav-item">
+        <a class="nav-link js-search" href="#"><i class="fas fa-search" aria-hidden="true"></i></a>
+      </li>
+      
+
+      
+      <li class="nav-item">
+        <a class="nav-link js-dark-toggle" href="#"><i class="fas fa-moon" aria-hidden="true"></i></a>
+      </li>
+      
+
+      
+
+    </ul>
+
+  </div>
+</nav>
+
+
+  <article class="article">
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="article-container pt-3">
+  <h1>Survival analysis, censoring and hacking the log_prob in TensorFlow Probability</h1>
+
+  
+
+  
+  
+
+
+<div class="article-metadata">
+
+  
+  
+
+  
+  <span class="article-date">
+    
+    
+      
+    
+    Oct 1, 2019
+  </span>
+  
+
+  
+
+  
+  <span class="middot-divider"></span>
+  <span class="article-reading-time">
+    13 min read
+  </span>
+  
+
+  
+  
+  
+
+  
+  
+
+</div>
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+</div>
+
+
+
+  <div class="article-container">
+
+    <div class="article-style">
+      
+
+<h2 id="tl-dr">TL;DR</h2>
+
+<p>Survival analysis is a super useful technique for modelling time-to-event data; implementing a simple survival analysis using TFP requires hacking around the sampler log probability function; in this post we&rsquo;ll see how to do this, and introduce the basic terminology of survival analysis.</p>
+
+<h1 id="survival-analysis-101">Survival analysis 101</h1>
+
+<p>Survival analysis is an <em>incredibly</em> useful technique for modeling time-to-something data. &ldquo;something&rdquo; can be the death a patient (hence the name), the <a href="https://github.com/gm-spacagna/deep-ttf" target="_blank">failure</a> of some part in a machine, the <a href="https://ragulpr.github.io/2016/12/22/WTTE-RNN-Hackless-churn-modeling/" target="_blank">churn</a> of a customer, the <a href="https://lifelines.readthedocs.io/en/latest/Survival%20analysis%20with%20lifelines.html" target="_blank">fall</a> of a regime, and tons of other problems. Since time-to-event questions are everywhere, you&rsquo;ll see survival analysis (possibly under different names) in clinical studies, econometrics, epidemiology, mechnical engineering, etc.</p>
+
+<p>For me, one of the biggest sell-points of survival analysis is that it provides an elegant solution to handle <em>censored</em> observations. This is a technical term, and it can be quite confusing<sup class="footnote-ref" id="fnref:1"><a href="#fn:1">1</a></sup>, so I&rsquo;ll try to illustrate it with a toy example. Say you&rsquo;re selling diapers, and you bought 100 diapers to begin with - that&rsquo;s your stock. After one month, you&rsquo;ve sold 32 diapers, and still have 68 diapers in stock. To plan the size of the warehouse you want to build, you want to estimate how long it takes you to sell a diaper. Obviously, taking the mean of selling-times of the 32 diapers you&rsquo;ve sold would give you an overly optimistic estimation&hellip; but what do you do with the 68 diapers you still have in stock? How can you use the information that they&rsquo;ve been sitting here for some time already to improve your estimation? You call them &ldquo;censored diapers&rdquo;<sup class="footnote-ref" id="fnref:2"><a href="#fn:2">2</a></sup> and use survival analysis.</p>
+
+<h1 id="survival-analysis-mathematics">Survival analysis mathematics</h1>
+
+<p>Survival analysis is a huge topic and I&rsquo;m obviously not going to cover everything in here. I&rsquo;ll focus on the terminology needed for this post; for a more detailed introduction, I highly recommend checking out <a href="https://lifelines.readthedocs.io/en/latest/Quickstart.html" target="_blank">lifelines docs</a> (we&rsquo;ll use lifelines - a python package for survival analysis - in this post, as well).</p>
+
+<p>As mentioned above, survival analysis is about estimating a time-to-event. Let&rsquo;s denote this time with $T$. Ideally, we&rsquo;re interested in learning a probability distribution $P$ over the possible values of $T$. Note that this already assumes $T$ happens <em>sometimes</em> in the future, since the distribution integrates to 1. This is a reasonable assumption when we study mortality, but not as much when studying something like conversion rates - see <a href="https://erikbern.com/2019/08/05/modeling-conversion-rates-using-weibull-and-gamma-distributions.html" target="_blank">this</a> post for more details if you&rsquo;re interested. In this post I&rsquo;ll stick to the more traditional (and morbid) survival analysis in which everyone dies eventually.</p>
+
+<p>So we have this $P_{\theta}\left(T\right)$, which is defined by some parameter $\theta$ (there are also semi-parametric and non-parametric approaches to survival analysis; we&rsquo;ll get to that below). This formulation allows us to handle censored observations naturally; given the times of the observed event $\left\{O_1,O_2,&hellip;,O_n\right\}$ ($n=32$ in the diapers example; these are times until the event happened), and the times of the censored events $\left\{C_1,C_2,&hellip;,C_m\right\}$ ($m=68$ in the diapers example; these are times until censoring happened), we can construct the likelihood function</p>
+
+<p>$$
+\mathcal{L}\left(\underbrace{\theta}_{\text{parameter}}\vert \underbrace{O_1,O_2,&hellip;,O_n,C_1,C_2,&hellip;,C_m}_{\text{data}}\right) = \prod_{i=1}^n {P_\theta\left(T=O_i\right)} \prod_{j=1}^m {P_\theta\left(T&gt;C_j\right)}
+$$</p>
+
+<p>&hellip; since the only thing we know about the censored events is that the time-of-event is greater than the time of censoring. Now add a prior on $\theta$ and you&rsquo;ve got yourself a posterior (up to normalization which we usually don&rsquo;t really care about).</p>
+
+<p>Let&rsquo;s cook up an example to see how this works.</p>
+
+<h1 id="censored-diapers">Censored diapers</h1>
+
+<pre><code class="language-python"># the necessary imports
+import tensorflow as tf
+import tensorflow_probability as tfp
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt 
+import numpy as np
+from tensorflow_probability import distributions as tfd
+from tensorflow_probability import bijectors as tfb
+from matplotlib.lines import Line2D
+tf.compat.v1.enable_eager_execution()
+
+# for plotting
+sns.set_palette(&quot;muted&quot;)
+
+# for reproducibility
+np.random.seed(1324)
+tf.random.set_random_seed(234)
+</code></pre>
+
+<p>Say we start stocking up on diapers on January 1st. Some arrive to us exactly on time, some arrive later - arrival times are uniformly distributed within January.
+For simplicity, we assume that the real underlying event times (from arrival to selling) are exponentially distributed with a mean of 50 days. This is what we would actually measure without censoring, that is - if we could&rsquo;ve waited long enough until all (or enough of) the diapers were sold.</p>
+
+<pre><code class="language-python">start_date = pd.to_datetime('2019-01-01')
+N_samples = 1000
+mean_time = 50
+arrival_rng = pd.date_range(start = start_date, periods=31, freq='D')
+arrival_date = np.random.choice(arrival_rng, size = N_samples)
+real_T = np.random.exponential(mean_time, size = N_samples).astype(int)
+df = pd.DataFrame({ 'Arrival Date': arrival_date, 'real_T': real_T, 
+                  'Real Selling Date' : arrival_date + pd.to_timedelta(real_T, unit='d')})
+</code></pre>
+
+<p>Let&rsquo;s assume censoring happens on March 1st - that&rsquo;s the day in which we decide &ldquo;OK, these diapers were sold after these real-selling-times, these diapers are still in stock, let&rsquo;s estimate mean time-to-event&rdquo;. Phrased differently - this is when we get the data. By definition, every diaper whose <code>Real Selling Date</code> is later than March 1st will be considered a censored observation. The times of the observed, uncensored event are from arrival to selling; The times for the censored events are from arrival to the censoring date.</p>
+
+<pre><code class="language-python">censoring_date = pd.to_datetime('2019-03-01')
+
+df['censored'] = df['Real Selling Date']&gt;censoring_date
+df['T'] = np.where(df['censored'], (censoring_date - df['Arrival Date']).dt.days, real_T)
+df.head()
+</code></pre>
+
+<table>
+<thead>
+<tr>
+<th>Arrival Date</th>
+<th>real_T</th>
+<th>Real Selling Date</th>
+<th>censored</th>
+<th>T</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>2019-01-03</td>
+<td>36</td>
+<td>2019-02-08</td>
+<td>False</td>
+<td>36</td>
+</tr>
+
+<tr>
+<td>2019-01-14</td>
+<td>325</td>
+<td>2019-12-05</td>
+<td>True</td>
+<td>46</td>
+</tr>
+
+<tr>
+<td>2019-01-16</td>
+<td>69</td>
+<td>2019-03-26</td>
+<td>True</td>
+<td>44</td>
+</tr>
+
+<tr>
+<td>2019-01-11</td>
+<td>62</td>
+<td>2019-03-14</td>
+<td>True</td>
+<td>49</td>
+</tr>
+
+<tr>
+<td>2019-01-19</td>
+<td>40</td>
+<td>2019-02-28</td>
+<td>False</td>
+<td>40</td>
+</tr>
+</tbody>
+</table>
+
+<p>Here we can already see the problem - censoring makes us <em>severely</em> underestimate the mean selling time:</p>
+
+<pre><code class="language-python">df.query(&quot;censored==0&quot;)['T'].mean(), real_T.mean()
+(19.681, 49.236)
+</code></pre>
+
+<p>Pictorially, this is how it looks like. We sample 20 rows of data, and plot their individual timelines. Censoring events are the red circles, and the censored part of each observation is the dashed blue line:</p>
+
+<pre><code class="language-python">plt.figure(figsize=(9,4))
+n = 20
+samp_df = df.sample(n)
+samp_cens = samp_df['censored']
+plt.hlines(np.arange(n), 
+           (samp_df['Arrival Date']-start_date).dt.days,
+           (samp_df['Arrival Date']-start_date).dt.days + samp_df['T'],
+           color='k')
+plt.hlines(np.where(samp_cens), 
+           (samp_df[samp_cens]['Arrival Date']-start_date).dt.days + samp_df[samp_cens]['T'],
+           (samp_df[samp_cens]['Real Selling Date']-start_date).dt.days,
+           color='darkblue', ls='--')
+plt.scatter([(censoring_date-start_date).days]*samp_cens.sum(),np.where(samp_cens),
+            s=50, facecolors='none', edgecolors='r')
+plt.axvline((censoring_date-start_date).days, ls='--',color='r')
+plt.xlabel(&quot;Days from start&quot;, size=15)
+plt.ylabel(&quot;Different samples&quot;, size=15)
+plt.yticks([])
+
+</code></pre>
+
+<p>Obviously, the mean length of the black lines is significantly shorter than that of <em>all</em> the lines; this is exactly the bias caused by ignoring the censored observations.</p>
+
+<p><img src="output_15_1.png" alt="png" /></p>
+
+<h1 id="the-model">The model</h1>
+
+<p>We assume a simple exponential distribution for the event times distribution:</p>
+
+<p>$$P_{\lambda}\left(T\right)=\frac{1}{\lambda}e^{-\frac{T}{\lambda}}$$</p>
+
+<p>In this parametrization, $\lambda$ is the mean time-to-event; we want to infer $\lambda$ from the data.
+We put a $\text{Normal}\left(\mu=3,\sigma=3\right)$ prior on $\log\lambda$, representing our prior belief that diapers aren&rsquo;t sold in nanoseconds nor in geological timescales, and the constraint that $\lambda$ must be positive.</p>
+
+<p>So, this means that our log probability function is:</p>
+
+<p>$$\underbrace{\sum_{i=1}^n \log{P_\lambda\left(T=O_i\right)}}_{\text{likelihood of observed}} + \underbrace{\sum_{j=1}^m \log{P_\lambda\left(T&gt;C_j\right)}}_{\text{likelihood of censored}}+\underbrace{\log\text{Normal}\left(\lambda\vert\mu=3,\sigma=3\right)}_{\text{Prior on }\lambda}$$</p>
+
+<p>The first sum and the last term are easy - we just define an exponential model with the prior we want and feed it with the observed samples. The tricky part is how to handle with the second, censored sum.</p>
+
+<h1 id="lccdf">LCCDF</h1>
+
+<p>The thing we need to implement in order to feed the right <code>log_prob</code> function to the sampler is called LCCDF: an intimidating acronym the stands for <strong>L</strong>og <strong>C</strong>omplementary  <strong>C</strong>umulative <strong>D</strong>ensity <strong>F</strong>unction. We&rsquo;ll unfold this backwards:</p>
+
+<ul>
+<li>The cumulative density function (CDF) of our time-to-event distribution is $F_\lambda\left(t\right)=P_\lambda(Tֿ\le t)$.</li>
+<li>The complmentary CDF (CCDF) is $1-F_\lambda\left(t\right)=P_\lambda(T&gt;t)$;</li>
+<li>Its log (LCCDF) is $\log P_\lambda(T&gt;t)$, which is exactly what we want.</li>
+</ul>
+
+<p>Some LCCDFs are implemented in languages such as Stan (<a href="https://mc-stan.org/docs/2_18/functions-reference/exponential-distribution.html" target="_blank">this</a> is what we want), but in TFP (currently) we have to implement this ourselves. Luckily, the CDF of the <a href="https://en.wikipedia.org/wiki/Exponential_distribution#Cumulative_distribution_function" target="_blank">exponential distribution</a> is $1-e^{-\frac{T}{\lambda}}$, which means our LCCDF is super simple - $\log P_\lambda(T&gt;t)=-\frac{T}{\lambda}$. Cases for which we don&rsquo;t have an analytical expression for the LCCDF are trickier to handle; The solution in Sigrid Keydana&rsquo;s <a href="https://blogs.rstudio.com/tensorflow/posts/2019-07-31-censored-data/" target="_blank">post</a> (using TFP built-in CDF functions) is more general, but I found it less numerically stable, and writing everything explicitly helped me understand what&rsquo;s going on. We&rsquo;ll stick with the simpler case in this introductory post.</p>
+
+<p>We now go ahead and implement this:</p>
+
+<pre><code class="language-python">#converting the data to tf tensors
+obs_times = tf.convert_to_tensor(df.query(&quot;censored==0&quot;)['T'])
+cens_times = tf.convert_to_tensor(df.query(&quot;censored==1&quot;)['T'])
+</code></pre>
+
+<p>This is our model, containing the normal prior on $\log\lambda$ and the exponential likelihood terms. This is pretty straightforward:</p>
+
+<pre><code class="language-python">obs_model = tfd.JointDistributionSequential(
+  [
+    tfd.Normal(3, 3), #log_rate
+    lambda log_rate:
+      tfd.Independent(tfd.Sample(
+        tfd.Exponential(rate = 
+            1/tf.math.exp(log_rate[:,tf.newaxis])
+        )), reinterpreted_batch_ndims = 1)
+  ]
+)
+</code></pre>
+
+<p>Now, given a $\log\lambda$, the exponential LCCDF function simply sums $-\frac{T}{\lambda}$ over all censored times. Note that <code>log_rate</code> has shape <code>(n_chains,)</code>, and <code>cens_times</code> has shape <code>(n_cens_times,)</code>, so we need to add a <code>tf.newaxis</code> to make sure both are broadcasted along the right dimensions. We also cast <code>cens_times</code> to float so the division is properly defined.</p>
+
+<pre><code class="language-python">def exponential_lccdf(log_rate):
+    return tf.reduce_sum(
+        -tf.cast(cens_times, log_rate.dtype)[tf.newaxis,:]/tf.exp(log_rate[:,tf.newaxis]),
+        axis=-1
+    )
+</code></pre>
+
+<p>Finally, we combine the likelihood of the observed times and the prior, which are given by <code>obs_model.log_prob</code> evaluated at the observed times, and the likelihood of the censored times, which we just defined:</p>
+
+<pre><code class="language-python">def log_prob(log_rate):
+    lp = obs_model.log_prob([log_rate, tf.cast(obs_times, log_rate.dtype)[tf.newaxis,:]])
+    censored_likelihood = exponential_lccdf(log_rate)
+    return lp + censored_likelihood
+</code></pre>
+
+<p>We now proceed as usual, by calling our HMC sampler helper function:</p>
+
+<pre><code class="language-python">@tf.function
+def sampleHMC(log_prob, inits, bijectors_list = None):
+    inner_kernel=tfp.mcmc.HamiltonianMonteCarlo(
+        target_log_prob_fn=log_prob,
+        step_size=0.1,
+        num_leapfrog_steps=8
+    )
+    if bijectors_list is not None:
+        inner_kernel = tfp.mcmc.TransformedTransitionKernel(inner_kernel, bijectors_list)
+        
+    adaptive_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
+        inner_kernel=inner_kernel,
+        num_adaptation_steps=800
+    )
+    return tfp.mcmc.sample_chain(
+        num_results=1000,
+        current_state=inits,
+        kernel=adaptive_kernel,
+        num_burnin_steps=1000,
+        trace_fn=None
+    )
+</code></pre>
+
+<pre><code class="language-python">n_chains = 4
+initial_log_rate = obs_model.sample(n_chains)
+
+samps = sampleHMC(log_prob, [tf.ones_like(initial_log_rate[0])*3.])
+</code></pre>
+
+<p>Just for comparison, if we call the sampler without the censored likelihood (meaning we &ldquo;throw away&rdquo; the censored observations), this is what we get:</p>
+
+<pre><code class="language-python">samps_ignore_censored = sampleHMC(
+    lambda log_rate:obs_model.log_prob([log_rate, tf.cast(obs_times, log_rate.dtype)[tf.newaxis,:]]),
+    [tf.zeros_like(initial_log_rate[0])]
+)
+</code></pre>
+
+<pre><code class="language-python">sns.distplot(np.exp(samps[0].numpy().flatten()),label='With censored')
+sns.distplot(np.exp(samps_ignore_censored[0].numpy().flatten()),label='Without censored')
+plt.axvline(real_T.mean(),ls='--',c='k',label='Empirical mean of real T')
+plt.legend()
+plt.xlabel(&quot;$\lambda$&quot;,size=15)
+plt.ylabel('Density',size=15)
+pass
+</code></pre>
+
+<p><img src="output_32_0.png" alt="png" /></p>
+
+<h1 id="survival-regression">Survival regression</h1>
+
+<p>This was a very simple and cooked-up demonstration of survival analysis, mainly to illustrate how to account for censored observations by adding the necessary LCCDF to the sampler log probability function. However, in many cases what we actually want is to understand how different features affect survival probability. For example, we&rsquo;d like to understand how a given treatment affects the survival probabilities of patients, or the age of customers affects time-to-lapse or whatnot. This is called survival regression.</p>
+
+<p>Like in the previous posts, I&rsquo;m sticking to the excellent examples from McElreath&rsquo;s Statistical Rethinking book. However, this example is actually not from the book itself, but from <a href="https://www.youtube.com/watch?v=p7g-CgGCS34" target="_blank">Statistical Rethinking Winter 2019 Lecture 13</a> from 23:43 onwards (you should probably go watch this now, the relevant part is about 10 minutes long).</p>
+
+<p>The data in this example is from an animal care facility in Austin (<a href="https://data.austintexas.gov/browse?q=animal&amp;sortBy=relevance" target="_blank">source</a>), and describes cats arrival time to the facility, when/if/how they left, breed, color, age, etc. For us, the event of interest is adoption - we&rsquo;ll try to estimate time-to-adoption. But this time, we&rsquo;re using the cats color as a predictor: we&rsquo;ll compare the adoption times of black cats vs. non-black cats.</p>
+
+<p>We&rsquo;re using the same data as McElreath (who kindly supplied both the data and the .R script containing the processing):</p>
+
+<pre><code class="language-python"># references to original data (from the email)
+df = pd.read_csv(&quot;https://raw.githubusercontent.com/adamhaber/adamhaber.github.io/master/assets/AustinCats.csv&quot;, delimiter=';')
+</code></pre>
+
+<pre><code class="language-python">df['black'] = df.color.apply(lambda x: x=='Black')
+df['adopted'] = df.out_event.apply(lambda x: x=='Adoption')
+
+is_black_cens = tf.convert_to_tensor(df.query('adopted==0').black.values.astype(float))
+is_black_obs = tf.convert_to_tensor(df.query('adopted==1').black.values.astype(float))
+
+y_cens = tf.convert_to_tensor(df.query('adopted==0').days_to_event)
+y_obs = tf.convert_to_tensor(df.query('adopted==1').days_to_event)
+</code></pre>
+
+<p>The model is very similar to our made-up example from before - the only thing that&rsquo;s different is that now $\log\lambda$ is a simple linear function:</p>
+
+<p>$$\log\lambda = \alpha+\beta\cdot\text{is_black}$$</p>
+
+<p>$\text{is_black}$ equals one for black cats, and zero otherwise, which means the log rate equals $\alpha+\beta$ for black cats and $\alpha$ otherwise. So, instead of estimating $\log\lambda$ directly, we&rsquo;re estimating the parameters of this simple linear model. The prior for the intercept is the same as in the previous example, and the prior for the slope is centered around zero (we don&rsquo;t have a-priori reason to believe black cats are bigoted against), and of the same scale.</p>
+
+<pre><code class="language-python">obs_model = tfd.JointDistributionSequential(
+  [
+    tfd.Normal(3, 3), #alpha
+    tfd.Normal(0, 3), #beta
+    lambda beta, alpha:
+      tfd.Independent(tfd.Sample(
+        tfd.Exponential(rate = 
+            1/tf.math.exp(tf.cast(is_black_obs[tf.newaxis,:], beta.dtype)*beta[:,tf.newaxis]+\
+                        alpha[:,tf.newaxis])
+        )), reinterpreted_batch_ndims = 1)
+  ]
+)
+</code></pre>
+
+<p>The LCCDF function is again very similar, but this time in the denominator we have our simple linear function and not just a single parameter:</p>
+
+<pre><code class="language-python">def exponential_lccdf(alpha, beta):
+    return tf.reduce_sum(
+        -tf.cast(y_cens[tf.newaxis,:],alpha.dtype) / tf.exp(tf.cast(is_black_cens[tf.newaxis,:], beta.dtype) * beta[:,tf.newaxis] + alpha[:,tf.newaxis]),
+        axis=-1
+    )
+</code></pre>
+
+<p><code>log_prob</code> is exactly the same, and so is the code for calling the sampler:</p>
+
+<pre><code class="language-python">def log_prob(alpha, beta):
+    lp = obs_model.log_prob([alpha, beta, tf.cast(y_obs, alpha.dtype)[tf.newaxis,:]])
+    potential =  exponential_lccdf(alpha, beta)
+    return lp + potential
+</code></pre>
+
+<pre><code class="language-python">n_chains = 4
+initial_coeffs = obs_model.sample(n_chains)
+alphas, betas = sampleHMC(log_prob, [tf.zeros_like(initial_coeffs[0]), tf.zeros_like(initial_coeffs[1])])
+</code></pre>
+
+<p>We convert samples back to <code>numpy</code> for easier plotting, and compute the corresponding rates:</p>
+
+<pre><code class="language-python">alphas = alphas.numpy().flatten()
+betas = betas.numpy().flatten()
+
+lambda_black = np.exp(alphas + betas)
+lambda_non_black = np.exp(alphas)
+</code></pre>
+
+<pre><code class="language-python">sns.distplot(lambda_black,color='k',label='black')
+sns.distplot(lambda_non_black,color='orange',label='non black')
+plt.legend(fontsize=15)
+plt.xlabel(&quot;Days to adoption&quot;,size=15)
+plt.ylabel(&quot;Density&quot;,size=15)
+</code></pre>
+
+<p><img src="output_49_1.png" alt="png" /></p>
+
+<p>It turns out people <em>are</em> biased against black cats! We can also use the inferred rates to plot one of the central quantities of interest in survival analysis - the <strong>survival function</strong>. The survival function is simply the CCDF from before:</p>
+
+<p>$$S(t) = P(T&gt;t)$$</p>
+
+<p>$S(t)$ quantifies the probability of surviving longer than $t$. For the minimal possible duration (0 in our case), $S(0)=1$, and $S(\infty)=0$ (everyone dies). We can use the inferred rates to plot the estimated survival curves:</p>
+
+<pre><code class="language-python">t = np.linspace(0,200)
+for lam_nb, lam_b in zip(lambda_non_black[:100], lambda_black[:100]):
+    plt.plot(t, np.exp(-t/lam_nb),c='orange', alpha=0.1)    
+    plt.plot(t, np.exp(-t/lam_b),c='black', alpha=0.1)    
+plt.ylabel(&quot;Proportion remaining&quot;)
+plt.xlabel(&quot;Days&quot;)
+legend_elements = [Line2D([0], [0], color='black', label='black'),
+                   Line2D([0], [0], color='orange', label='orange')]
+plt.legend(handles=legend_elements,fontsize=15)
+</code></pre>
+
+<p><img src="output_51_1.png" alt="png" /></p>
+
+<p>&hellip; which is the same plot as in the lecture.</p>
+
+<h1 id="overthinking-box-kaplan-meier-non-parametric-estimator">Overthinking box - Kaplan Meier non-parametric estimator</h1>
+
+<p>In all we&rsquo;ve done so far, we&rsquo;ve assumed a specific parametric form for the durations distributions&hellip; but how can we check if this assumption makes any sense? One way is to compare it to a non-parametric estimator of the survival function.</p>
+
+<p>The Kaplan-Meier estimator is a non-parametric estimator that does just that. It is defined as follows:</p>
+
+<p>$$S_{KM}\left(t\right) = \prod_{t_i&lt;t}{\left(1-\frac{d_i}{n_i}\right)}$$</p>
+
+<p>Where $t_i$ are all the event times smaller than $t$ (from the data itself); $n_i$ is the number of people &ldquo;at risk&rdquo; between $t_{i-1}$ and $t_i$ (which means they survived all the events up to and including $t_{i-1}$); and $d_i$ is the number of observed deaths at time $t_i$ (deaths at the interval $\left(t_{i-1},t_i\right]$).</p>
+
+<p>This formula has a pretty intuitive explanation - surviving up to time $t$ means surviving all the events before $t$;
+For each such event, in which $d_i$ out of $n_i$ subjects died, the estimated survival probability is $1-\frac{d_i}{n_i}$, so surviving <em>all of them</em> is the product of all these numbers.</p>
+
+<p>Instead of implementing KM estimator ourselves, we&rsquo;ll use the wonderful <a href="https://lifelines.readthedocs.io/en/latest/index.html" target="_blank">lifelines</a> library, which is the most comprehensive python package for survival analysis I know of (R has a much better survival analysis ecosystem). Implementation is easy, but if you&rsquo;re interested in survival analysis, you should check out <code>lifelines</code>; it has a wonderful API, great docs and a wide range of models, helper functions, plotting and summary statistics.</p>
+
+<p>We&rsquo;ll fit two KM estimators - one for black cats and one for non-black cats, so we can compare the non-parametric to our parametric survival functions:</p>
+
+<pre><code class="language-python">from lifelines import KaplanMeierFitter
+plt.figure(figsize=(9,9))
+ax = plt.subplot(111)
+
+kmf = KaplanMeierFitter()
+kmf.fit(df[df.black==1].days_to_event, event_observed=df[df.black==1].adopted,label='black cats')
+kmf.plot(ax=ax,c='k')
+kmf.fit(df[df.black==0].days_to_event, event_observed=df[df.black==0].adopted,label='non black cats')
+kmf.plot(ax=ax,c='orange')
+
+for lam_nb, lam_b in zip(lambda_non_black[:100], lambda_black[:100]):
+    plt.plot(t, np.exp(-t/lam_nb),c='orange', alpha=0.1)    
+    plt.plot(t, np.exp(-t/lam_b),c='black', alpha=0.1)    
+plt.ylabel(&quot;Proportion remaining&quot;,size=15)
+plt.xlabel(&quot;Days&quot;,size=15)
+plt.legend(fontsize=15)
+plt.xlim(0, 100)
+</code></pre>
+
+<p><img src="output_58_1.png" alt="png" /></p>
+
+<p>What are we seeing here?</p>
+
+<ol>
+<li>The &ldquo;smooth&rdquo; black and orange curves are exponential survival curves with the sampled parameters.</li>
+<li>The &ldquo;staircase&rdquo; curves (aka piecewise constant functions) are the non parametric KM estimates. For details about their confidence intervals, see <a href="https://www.math.wustl.edu/%7Esawyer/handouts/greenwood.pdf" target="_blank">here</a>.</li>
+</ol>
+
+<p>So, how good is our assumed parametric form? That, of course, depends on how much you care about capturing all the small details; It seems to capture the overall trend, but, for example, it doesn&rsquo;t quite capture the &ldquo;sigmoidal&rdquo;-like behavior around days 0-10, and it overestimates the survival probability between days 60-100 for both groups. This is somewhat expected - we&rsquo;d be surprised if a single-parameter model would be able to capture all the details we see in the non-parametric curve.</p>
+
+<h1 id="summing-up">Summing up</h1>
+
+<p>This post was pretty introductory - its main goal was to explain what censorship is (I think this is a super important concept to understand if you&rsquo;re doing any kind of data analysis), and to implement a likelihood function that can handle censored observations. In the next post we&rsquo;ll dive a little deeper into survival regression, still from a bayesian modeling persepctive.</p>
+<div class="footnotes">
+
+<hr />
+
+<ol>
+<li id="fn:1">One possible source of confusion here is the terminology; you will find the expressions &ldquo;censored observations&rdquo;, &ldquo;censored times&rdquo;, &ldquo;events whose time were censored&rdquo;, etc. used pretty interchangeably. Unless stated otherwise, all of these usually refer to same thing.
+ <a class="footnote-return" href="#fnref:1"><sup>^</sup></a></li>
+<li id="fn:2">Technically, these are called &ldquo;right censored&rdquo; diapers; if you think of time as going from left to right like it&rsquo;s usually plotted, than the right &ldquo;tail&rdquo; of the plots for these diapers is censored from us. There are also other kinds of censoring, but we&rsquo;ll ignore them in this post.
+ <a class="footnote-return" href="#fnref:2"><sup>^</sup></a></li>
+</ol>
+</div>
+
+    </div>
+
+    
+
+
+
+
+
+<div class="article-tags">
+  
+  <a class="badge badge-light" href="/tags/tfp/">TFP</a>
+  
+  <a class="badge badge-light" href="/tags/survival-analysis/">Survival Analysis</a>
+  
+</div>
+
+
+
+<div class="share-box" aria-hidden="true">
+  <ul class="share">
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://twitter.com/intent/tweet?url=https://adamhaber.github.io/post/survival-analysis/&amp;text=Survival%20analysis,%20censoring%20and%20hacking%20the%20log_prob%20in%20TensorFlow%20Probability" target="_blank" rel="noopener" class="share-btn-twitter">
+          <i class="fab fa-twitter"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://www.facebook.com/sharer.php?u=https://adamhaber.github.io/post/survival-analysis/&amp;t=Survival%20analysis,%20censoring%20and%20hacking%20the%20log_prob%20in%20TensorFlow%20Probability" target="_blank" rel="noopener" class="share-btn-facebook">
+          <i class="fab fa-facebook"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="mailto:?subject=Survival%20analysis,%20censoring%20and%20hacking%20the%20log_prob%20in%20TensorFlow%20Probability&amp;body=https://adamhaber.github.io/post/survival-analysis/" target="_blank" rel="noopener" class="share-btn-email">
+          <i class="fas fa-envelope"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://www.linkedin.com/shareArticle?url=https://adamhaber.github.io/post/survival-analysis/&amp;title=Survival%20analysis,%20censoring%20and%20hacking%20the%20log_prob%20in%20TensorFlow%20Probability" target="_blank" rel="noopener" class="share-btn-linkedin">
+          <i class="fab fa-linkedin-in"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://web.whatsapp.com/send?text=Survival%20analysis,%20censoring%20and%20hacking%20the%20log_prob%20in%20TensorFlow%20Probability%20https://adamhaber.github.io/post/survival-analysis/" target="_blank" rel="noopener" class="share-btn-whatsapp">
+          <i class="fab fa-whatsapp"></i>
+        </a>
+      </li>
+    
+      
+      
+      
+        
+      
+      
+      
+      <li>
+        <a href="https://service.weibo.com/share/share.php?url=https://adamhaber.github.io/post/survival-analysis/&amp;title=Survival%20analysis,%20censoring%20and%20hacking%20the%20log_prob%20in%20TensorFlow%20Probability" target="_blank" rel="noopener" class="share-btn-weibo">
+          <i class="fab fa-weibo"></i>
+        </a>
+      </li>
+    
+  </ul>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+  
+  
+  
+    
+  
+  
+  <div class="media author-card content-widget-hr">
+    
+      
+      <img class="portrait mr-3" src="/authors/admin/avatar_hud138a96a47a9e2657537fb19ee618cb6_16021_250x250_fill_q90_lanczos_center.jpg" alt="Avatar">
+    
+
+    <div class="media-body">
+      <h5 class="card-title"><a href="https://adamhaber.github.io/">Adam Haber</a></h5>
+      <h6 class="card-subtitle">Computational Neuroscience PhD Student</h6>
+      <p class="card-text">Interested in probabilistic programming, computational statistics, statistical physics and programming languages.</p>
+      <ul class="network-icon" aria-hidden="true">
+  
+    
+    
+    
+      
+    
+    
+    
+    
+    
+      
+    
+    <li>
+      <a href="/#mailto:adamhaber@gmail.com" >
+        <i class="fas fa-envelope"></i>
+      </a>
+    </li>
+  
+    
+    
+    
+      
+    
+    
+    
+    
+    
+      
+    
+    <li>
+      <a href="https://twitter.com/_adam_haber" target="_blank" rel="noopener">
+        <i class="fab fa-twitter"></i>
+      </a>
+    </li>
+  
+    
+    
+    
+      
+    
+    
+    
+    
+    
+      
+    
+    <li>
+      <a href="https://github.com/adamhaber" target="_blank" rel="noopener">
+        <i class="fab fa-github"></i>
+      </a>
+    </li>
+  
+</ul>
+
+    </div>
+  </div>
+
+
+
+
+
+
+<script type="text/javascript"
+  src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+  </script>
+
+
+
+
+
+
+
+<div class="article-widget content-widget-hr">
+  <h3>Related</h3>
+  <ul>
+    
+    <li><a href="/post/varying-slopes/">Varying Slopes Models and the CholeskyLKJ distribution in TensorFlow Probability</a></li>
+    
+    <li><a href="/post/varying-intercepts/">A Tutorial on Varying Intercepts Models with TensorFlow Probability</a></li>
+    
+  </ul>
+</div>
+
+
+
+  </div>
+</article>
+
+      
+
+    
+    
+    
+    <script src="/js/mathjax-config.js"></script>
+    
+
+    
+    
+    
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js" integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo=" crossorigin="anonymous"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.imagesloaded/4.1.4/imagesloaded.pkgd.min.js" integrity="sha256-lqvxZrPLtfffUl2G/e7szqSvPBILGbwmsGE1MKlOi0Q=" crossorigin="anonymous"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.isotope/3.0.6/isotope.pkgd.min.js" integrity="sha256-CBrpuqrMhXwcLLUd5tvQ4euBHCdh7wGlDfNz8vbu/iI=" crossorigin="anonymous"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/fancybox/3.5.7/jquery.fancybox.min.js" integrity="sha256-yt2kYMy0w8AbtF89WXb2P1rfjcP/HTHLT7097U8Y5b8=" crossorigin="anonymous"></script>
+
+      
+
+      
+        
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/highlight.min.js" integrity="sha256-1zu+3BnLYV9LdiY85uXMzii3bdrkelyp37e0ZyTAQh0=" crossorigin="anonymous"></script>
+        
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/languages/r.min.js"></script>
+        
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.10/languages/python.min.js"></script>
+        
+      
+
+      
+      
+      <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" integrity="" crossorigin="anonymous" async></script>
+      
+    
+
+    
+    
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.5.1/leaflet.js" integrity="sha256-EErZamuLefUnbMBQbsEqu1USa+btR2oIlCpBJbyD4/g=" crossorigin="anonymous"></script>
+    
+
+    
+    
+    <script>hljs.initHighlightingOnLoad();</script>
+    
+
+    
+    
+    
+    
+    
+    
+    <script>
+      const search_config = {"indexURI":"/index.json","minLength":1,"threshold":0.3};
+      const i18n = {"no_results":"No results found","placeholder":"Search...","results":"results found"};
+      const content_type = {
+        'post': "Posts",
+        'project': "Projects",
+        'publication' : "Publications",
+        'talk' : "Talks"
+        };
+    </script>
+    
+
+    
+    
+
+    
+    
+    <script id="search-hit-fuse-template" type="text/x-template">
+      <div class="search-hit" id="summary-{{key}}">
+      <div class="search-hit-content">
+        <div class="search-hit-name">
+          <a href="{{relpermalink}}">{{title}}</a>
+          <div class="article-metadata search-hit-type">{{type}}</div>
+          <p class="search-hit-description">{{snippet}}</p>
+        </div>
+      </div>
+      </div>
+    </script>
+    
+
+    
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/3.2.1/fuse.min.js" integrity="sha256-VzgmKYmhsGNNN4Ph1kMW+BjoYJM2jV5i4IlFoeZA9XI=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mark.js/8.11.1/jquery.mark.min.js" integrity="sha256-4HLtjeVgH0eIB3aZ9mLYF6E8oU5chNdjU6p6rrXpl9U=" crossorigin="anonymous"></script>
+    
+
+    
+    
+
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+      
+    
+    
+    
+    
+    <script src="/js/academic.min.96cf4c3dc37ea60dbbd03c13a455f1f7.js"></script>
+
+    
+
+
+
+
+
+
+  
+  
+  <div class="container">
+    <footer class="site-footer">
+  
+
+  <p class="powered-by">
+    
+
+    Powered by the
+    <a href="https://sourcethemes.com/academic/" target="_blank" rel="noopener">Academic theme</a> for
+    <a href="https://gohugo.io" target="_blank" rel="noopener">Hugo</a>.
+
+    
+    <span class="float-right" aria-hidden="true">
+      <a href="#" class="back-to-top">
+        <span class="button_icon">
+          <i class="fas fa-chevron-up fa-2x"></i>
+        </span>
+      </a>
+    </span>
+    
+  </p>
+</footer>
+
+  </div>
+  
+
+  
+<div id="modal" class="modal fade" role="dialog">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Cite</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <pre><code class="tex hljs"></code></pre>
+      </div>
+      <div class="modal-footer">
+        <a class="btn btn-outline-primary my-1 js-copy-cite" href="#" target="_blank">
+          <i class="fas fa-copy"></i> Copy
+        </a>
+        <a class="btn btn-outline-primary my-1 js-download-cite" href="#" target="_blank">
+          <i class="fas fa-download"></i> Download
+        </a>
+        <div id="modal-error"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
