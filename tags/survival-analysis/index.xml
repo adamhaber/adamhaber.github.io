@@ -17,79 +17,56 @@
       <link>https://adamhaber.github.io/post/survival-analysis/</link>
       <pubDate>Tue, 01 Oct 2019 00:00:00 +0000</pubDate>
       <guid>https://adamhaber.github.io/post/survival-analysis/</guid>
-      <description>
-
-&lt;h2 id=&#34;tl-dr&#34;&gt;TL;DR&lt;/h2&gt;
-
+      <description>&lt;h2 id=&#34;tldr&#34;&gt;TL;DR&lt;/h2&gt;
 &lt;p&gt;Survival analysis is a super useful technique for modelling time-to-event data; implementing a simple survival analysis using TFP requires hacking around the sampler log probability function; in this post we&amp;rsquo;ll see how to do this, and introduce the basic terminology of survival analysis.&lt;/p&gt;
-
 &lt;h1 id=&#34;survival-analysis-101&#34;&gt;Survival analysis 101&lt;/h1&gt;
-
-&lt;p&gt;Survival analysis is an &lt;em&gt;incredibly&lt;/em&gt; useful technique for modeling time-to-something data. &amp;ldquo;something&amp;rdquo; can be the death a patient (hence the name), the &lt;a href=&#34;https://github.com/gm-spacagna/deep-ttf&#34; target=&#34;_blank&#34;&gt;failure&lt;/a&gt; of some part in a machine, the &lt;a href=&#34;https://ragulpr.github.io/2016/12/22/WTTE-RNN-Hackless-churn-modeling/&#34; target=&#34;_blank&#34;&gt;churn&lt;/a&gt; of a customer, the &lt;a href=&#34;https://lifelines.readthedocs.io/en/latest/Survival%20analysis%20with%20lifelines.html&#34; target=&#34;_blank&#34;&gt;fall&lt;/a&gt; of a regime, and tons of other problems. Since time-to-event questions are everywhere, you&amp;rsquo;ll see survival analysis (possibly under different names) in clinical studies, econometrics, epidemiology, mechnical engineering, etc.&lt;/p&gt;
-
-&lt;p&gt;For me, one of the biggest sell-points of survival analysis is that it provides an elegant solution to handle &lt;em&gt;censored&lt;/em&gt; observations. This is a technical term, and it can be quite confusing&lt;sup class=&#34;footnote-ref&#34; id=&#34;fnref:1&#34;&gt;&lt;a href=&#34;#fn:1&#34;&gt;1&lt;/a&gt;&lt;/sup&gt;, so I&amp;rsquo;ll try to illustrate it with a toy example. Say you&amp;rsquo;re selling diapers, and you bought 100 diapers to begin with - that&amp;rsquo;s your stock. After one month, you&amp;rsquo;ve sold 32 diapers, and still have 68 diapers in stock. To plan the size of the warehouse you want to build, you want to estimate how long it takes you to sell a diaper. Obviously, taking the mean of selling-times of the 32 diapers you&amp;rsquo;ve sold would give you an overly optimistic estimation&amp;hellip; but what do you do with the 68 diapers you still have in stock? How can you use the information that they&amp;rsquo;ve been sitting here for some time already to improve your estimation? You call them &amp;ldquo;censored diapers&amp;rdquo;&lt;sup class=&#34;footnote-ref&#34; id=&#34;fnref:2&#34;&gt;&lt;a href=&#34;#fn:2&#34;&gt;2&lt;/a&gt;&lt;/sup&gt; and use survival analysis.&lt;/p&gt;
-
+&lt;p&gt;Survival analysis is an &lt;em&gt;incredibly&lt;/em&gt; useful technique for modeling time-to-something data. &amp;ldquo;something&amp;rdquo; can be the death a patient (hence the name), the &lt;a href=&#34;https://github.com/gm-spacagna/deep-ttf&#34;&gt;failure&lt;/a&gt; of some part in a machine, the &lt;a href=&#34;https://ragulpr.github.io/2016/12/22/WTTE-RNN-Hackless-churn-modeling/&#34;&gt;churn&lt;/a&gt; of a customer, the &lt;a href=&#34;https://lifelines.readthedocs.io/en/latest/Survival%20analysis%20with%20lifelines.html&#34;&gt;fall&lt;/a&gt; of a regime, and tons of other problems. Since time-to-event questions are everywhere, you&amp;rsquo;ll see survival analysis (possibly under different names) in clinical studies, econometrics, epidemiology, mechnical engineering, etc.&lt;/p&gt;
+&lt;p&gt;For me, one of the biggest sell-points of survival analysis is that it provides an elegant solution to handle &lt;em&gt;censored&lt;/em&gt; observations. This is a technical term, and it can be quite confusing&lt;sup id=&#34;fnref:1&#34;&gt;&lt;a href=&#34;#fn:1&#34; class=&#34;footnote-ref&#34; role=&#34;doc-noteref&#34;&gt;1&lt;/a&gt;&lt;/sup&gt;, so I&amp;rsquo;ll try to illustrate it with a toy example. Say you&amp;rsquo;re selling diapers, and you bought 100 diapers to begin with - that&amp;rsquo;s your stock. After one month, you&amp;rsquo;ve sold 32 diapers, and still have 68 diapers in stock. To plan the size of the warehouse you want to build, you want to estimate how long it takes you to sell a diaper. Obviously, taking the mean of selling-times of the 32 diapers you&amp;rsquo;ve sold would give you an overly optimistic estimation&amp;hellip; but what do you do with the 68 diapers you still have in stock? How can you use the information that they&amp;rsquo;ve been sitting here for some time already to improve your estimation? You call them &amp;ldquo;censored diapers&amp;rdquo;&lt;sup id=&#34;fnref:2&#34;&gt;&lt;a href=&#34;#fn:2&#34; class=&#34;footnote-ref&#34; role=&#34;doc-noteref&#34;&gt;2&lt;/a&gt;&lt;/sup&gt; and use survival analysis.&lt;/p&gt;
 &lt;h1 id=&#34;survival-analysis-mathematics&#34;&gt;Survival analysis mathematics&lt;/h1&gt;
-
-&lt;p&gt;Survival analysis is a huge topic and I&amp;rsquo;m obviously not going to cover everything in here. I&amp;rsquo;ll focus on the terminology needed for this post; for a more detailed introduction, I highly recommend checking out &lt;a href=&#34;https://lifelines.readthedocs.io/en/latest/Quickstart.html&#34; target=&#34;_blank&#34;&gt;lifelines docs&lt;/a&gt; (we&amp;rsquo;ll use lifelines - a python package for survival analysis - in this post, as well).&lt;/p&gt;
-
-&lt;p&gt;As mentioned above, survival analysis is about estimating a time-to-event. Let&amp;rsquo;s denote this time with $T$. Ideally, we&amp;rsquo;re interested in learning a probability distribution $P$ over the possible values of $T$. Note that this already assumes $T$ happens &lt;em&gt;sometimes&lt;/em&gt; in the future, since the distribution integrates to 1. This is a reasonable assumption when we study mortality, but not as much when studying something like conversion rates - see &lt;a href=&#34;https://erikbern.com/2019/08/05/modeling-conversion-rates-using-weibull-and-gamma-distributions.html&#34; target=&#34;_blank&#34;&gt;this&lt;/a&gt; post for more details if you&amp;rsquo;re interested. In this post I&amp;rsquo;ll stick to the more traditional (and morbid) survival analysis in which everyone dies eventually.&lt;/p&gt;
-
+&lt;p&gt;Survival analysis is a huge topic and I&amp;rsquo;m obviously not going to cover everything in here. I&amp;rsquo;ll focus on the terminology needed for this post; for a more detailed introduction, I highly recommend checking out &lt;a href=&#34;https://lifelines.readthedocs.io/en/latest/Quickstart.html&#34;&gt;lifelines docs&lt;/a&gt; (we&amp;rsquo;ll use lifelines - a python package for survival analysis - in this post, as well).&lt;/p&gt;
+&lt;p&gt;As mentioned above, survival analysis is about estimating a time-to-event. Let&amp;rsquo;s denote this time with $T$. Ideally, we&amp;rsquo;re interested in learning a probability distribution $P$ over the possible values of $T$. Note that this already assumes $T$ happens &lt;em&gt;sometimes&lt;/em&gt; in the future, since the distribution integrates to 1. This is a reasonable assumption when we study mortality, but not as much when studying something like conversion rates - see &lt;a href=&#34;https://erikbern.com/2019/08/05/modeling-conversion-rates-using-weibull-and-gamma-distributions.html&#34;&gt;this&lt;/a&gt; post for more details if you&amp;rsquo;re interested. In this post I&amp;rsquo;ll stick to the more traditional (and morbid) survival analysis in which everyone dies eventually.&lt;/p&gt;
 &lt;p&gt;So we have this $P_{\theta}\left(T\right)$, which is defined by some parameter $\theta$ (there are also semi-parametric and non-parametric approaches to survival analysis; we&amp;rsquo;ll get to that below). This formulation allows us to handle censored observations naturally; given the times of the observed event $\left\{O_1,O_2,&amp;hellip;,O_n\right\}$ ($n=32$ in the diapers example; these are times until the event happened), and the times of the censored events $\left\{C_1,C_2,&amp;hellip;,C_m\right\}$ ($m=68$ in the diapers example; these are times until censoring happened), we can construct the likelihood function&lt;/p&gt;
-
 &lt;p&gt;$$
 \mathcal{L}\left(\underbrace{\theta}_{\text{parameter}}\vert \underbrace{O_1,O_2,&amp;hellip;,O_n,C_1,C_2,&amp;hellip;,C_m}_{\text{data}}\right) = \prod_{i=1}^n {P_\theta\left(T=O_i\right)} \prod_{j=1}^m {P_\theta\left(T&amp;gt;C_j\right)}
 $$&lt;/p&gt;
-
 &lt;p&gt;&amp;hellip; since the only thing we know about the censored events is that the time-of-event is greater than the time of censoring. Now add a prior on $\theta$ and you&amp;rsquo;ve got yourself a posterior (up to normalization which we usually don&amp;rsquo;t really care about).&lt;/p&gt;
-
 &lt;p&gt;Let&amp;rsquo;s cook up an example to see how this works.&lt;/p&gt;
-
 &lt;h1 id=&#34;censored-diapers&#34;&gt;Censored diapers&lt;/h1&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#75715e&#34;&gt;# the necessary imports&lt;/span&gt;
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; tensorflow &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; tf
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; tensorflow_probability &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; tfp
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; pandas &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; pd
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; seaborn &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; sns
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; matplotlib.pyplot &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; plt 
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; numpy &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; np
+&lt;span style=&#34;color:#f92672&#34;&gt;from&lt;/span&gt; tensorflow_probability &lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; distributions &lt;span style=&#34;color:#66d9ef&#34;&gt;as&lt;/span&gt; tfd
+&lt;span style=&#34;color:#f92672&#34;&gt;from&lt;/span&gt; tensorflow_probability &lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; bijectors &lt;span style=&#34;color:#66d9ef&#34;&gt;as&lt;/span&gt; tfb
+&lt;span style=&#34;color:#f92672&#34;&gt;from&lt;/span&gt; matplotlib.lines &lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; Line2D
+tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;compat&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;v1&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;enable_eager_execution()
 
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;# the necessary imports
-import tensorflow as tf
-import tensorflow_probability as tfp
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt 
-import numpy as np
-from tensorflow_probability import distributions as tfd
-from tensorflow_probability import bijectors as tfb
-from matplotlib.lines import Line2D
-tf.compat.v1.enable_eager_execution()
+&lt;span style=&#34;color:#75715e&#34;&gt;# for plotting&lt;/span&gt;
+sns&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;set_palette(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;muted&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;)
 
-# for plotting
-sns.set_palette(&amp;quot;muted&amp;quot;)
-
-# for reproducibility
-np.random.seed(1324)
-tf.random.set_random_seed(234)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;Say we start stocking up on diapers on January 1st. Some arrive to us exactly on time, some arrive later - arrival times are uniformly distributed within January.
+&lt;span style=&#34;color:#75715e&#34;&gt;# for reproducibility&lt;/span&gt;
+np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;random&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;seed(&lt;span style=&#34;color:#ae81ff&#34;&gt;1324&lt;/span&gt;)
+tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;random&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;set_random_seed(&lt;span style=&#34;color:#ae81ff&#34;&gt;234&lt;/span&gt;)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Say we start stocking up on diapers on January 1st. Some arrive to us exactly on time, some arrive later - arrival times are uniformly distributed within January.
 For simplicity, we assume that the real underlying event times (from arrival to selling) are exponentially distributed with a mean of 50 days. This is what we would actually measure without censoring, that is - if we could&amp;rsquo;ve waited long enough until all (or enough of) the diapers were sold.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;start_date &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; pd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;to_datetime(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;2019-01-01&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+N_samples &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; &lt;span style=&#34;color:#ae81ff&#34;&gt;1000&lt;/span&gt;
+mean_time &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; &lt;span style=&#34;color:#ae81ff&#34;&gt;50&lt;/span&gt;
+arrival_rng &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; pd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;date_range(start &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; start_date, periods&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;31&lt;/span&gt;, freq&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;D&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+arrival_date &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;random&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;choice(arrival_rng, size &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; N_samples)
+real_T &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;random&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exponential(mean_time, size &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; N_samples)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;astype(int)
+df &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; pd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;DataFrame({ &lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Arrival Date&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;: arrival_date, &lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;real_T&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;: real_T, 
+                  &lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Real Selling Date&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt; : arrival_date &lt;span style=&#34;color:#f92672&#34;&gt;+&lt;/span&gt; pd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;to_timedelta(real_T, unit&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;d&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)})
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Let&amp;rsquo;s assume censoring happens on March 1st - that&amp;rsquo;s the day in which we decide &amp;ldquo;OK, these diapers were sold after these real-selling-times, these diapers are still in stock, let&amp;rsquo;s estimate mean time-to-event&amp;rdquo;. Phrased differently - this is when we get the data. By definition, every diaper whose &lt;code&gt;Real Selling Date&lt;/code&gt; is later than March 1st will be considered a censored observation. The times of the observed, uncensored event are from arrival to selling; The times for the censored events are from arrival to the censoring date.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;censoring_date &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; pd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;to_datetime(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;2019-03-01&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
 
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;start_date = pd.to_datetime(&#39;2019-01-01&#39;)
-N_samples = 1000
-mean_time = 50
-arrival_rng = pd.date_range(start = start_date, periods=31, freq=&#39;D&#39;)
-arrival_date = np.random.choice(arrival_rng, size = N_samples)
-real_T = np.random.exponential(mean_time, size = N_samples).astype(int)
-df = pd.DataFrame({ &#39;Arrival Date&#39;: arrival_date, &#39;real_T&#39;: real_T, 
-                  &#39;Real Selling Date&#39; : arrival_date + pd.to_timedelta(real_T, unit=&#39;d&#39;)})
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;Let&amp;rsquo;s assume censoring happens on March 1st - that&amp;rsquo;s the day in which we decide &amp;ldquo;OK, these diapers were sold after these real-selling-times, these diapers are still in stock, let&amp;rsquo;s estimate mean time-to-event&amp;rdquo;. Phrased differently - this is when we get the data. By definition, every diaper whose &lt;code&gt;Real Selling Date&lt;/code&gt; is later than March 1st will be considered a censored observation. The times of the observed, uncensored event are from arrival to selling; The times for the censored events are from arrival to the censoring date.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;censoring_date = pd.to_datetime(&#39;2019-03-01&#39;)
-
-df[&#39;censored&#39;] = df[&#39;Real Selling Date&#39;]&amp;gt;censoring_date
-df[&#39;T&#39;] = np.where(df[&#39;censored&#39;], (censoring_date - df[&#39;Arrival Date&#39;]).dt.days, real_T)
-df.head()
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;table&gt;
+df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;censored&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;] &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Real Selling Date&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;&amp;gt;&lt;/span&gt;censoring_date
+df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;T&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;] &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;where(df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;censored&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;], (censoring_date &lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt; df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Arrival Date&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;])&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days, real_T)
+df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;head()
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;table&gt;
 &lt;thead&gt;
 &lt;tr&gt;
 &lt;th&gt;Arrival Date&lt;/th&gt;
@@ -99,7 +76,6 @@ df.head()
 &lt;th&gt;T&lt;/th&gt;
 &lt;/tr&gt;
 &lt;/thead&gt;
-
 &lt;tbody&gt;
 &lt;tr&gt;
 &lt;td&gt;2019-01-03&lt;/td&gt;
@@ -108,7 +84,6 @@ df.head()
 &lt;td&gt;False&lt;/td&gt;
 &lt;td&gt;36&lt;/td&gt;
 &lt;/tr&gt;
-
 &lt;tr&gt;
 &lt;td&gt;2019-01-14&lt;/td&gt;
 &lt;td&gt;325&lt;/td&gt;
@@ -116,7 +91,6 @@ df.head()
 &lt;td&gt;True&lt;/td&gt;
 &lt;td&gt;46&lt;/td&gt;
 &lt;/tr&gt;
-
 &lt;tr&gt;
 &lt;td&gt;2019-01-16&lt;/td&gt;
 &lt;td&gt;69&lt;/td&gt;
@@ -124,7 +98,6 @@ df.head()
 &lt;td&gt;True&lt;/td&gt;
 &lt;td&gt;44&lt;/td&gt;
 &lt;/tr&gt;
-
 &lt;tr&gt;
 &lt;td&gt;2019-01-11&lt;/td&gt;
 &lt;td&gt;62&lt;/td&gt;
@@ -132,7 +105,6 @@ df.head()
 &lt;td&gt;True&lt;/td&gt;
 &lt;td&gt;49&lt;/td&gt;
 &lt;/tr&gt;
-
 &lt;tr&gt;
 &lt;td&gt;2019-01-19&lt;/td&gt;
 &lt;td&gt;40&lt;/td&gt;
@@ -142,321 +114,228 @@ df.head()
 &lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
-
 &lt;p&gt;Here we can already see the problem - censoring makes us &lt;em&gt;severely&lt;/em&gt; underestimate the mean selling time:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;query(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;censored==0&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;)[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;T&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;mean(), real_T&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;mean()
+(&lt;span style=&#34;color:#ae81ff&#34;&gt;19.681&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;49.236&lt;/span&gt;)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Pictorially, this is how it looks like. We sample 20 rows of data, and plot their individual timelines. Censoring events are the red circles, and the censored part of each observation is the dashed blue line:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;figure(figsize&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;(&lt;span style=&#34;color:#ae81ff&#34;&gt;9&lt;/span&gt;,&lt;span style=&#34;color:#ae81ff&#34;&gt;4&lt;/span&gt;))
+n &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; &lt;span style=&#34;color:#ae81ff&#34;&gt;20&lt;/span&gt;
+samp_df &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;sample(n)
+samp_cens &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; samp_df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;censored&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;]
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;hlines(np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;arange(n), 
+           (samp_df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Arrival Date&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;start_date)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days,
+           (samp_df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Arrival Date&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;start_date)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days &lt;span style=&#34;color:#f92672&#34;&gt;+&lt;/span&gt; samp_df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;T&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;],
+           color&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;k&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;hlines(np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;where(samp_cens), 
+           (samp_df[samp_cens][&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Arrival Date&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;start_date)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days &lt;span style=&#34;color:#f92672&#34;&gt;+&lt;/span&gt; samp_df[samp_cens][&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;T&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;],
+           (samp_df[samp_cens][&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Real Selling Date&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;start_date)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days,
+           color&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;darkblue&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;, ls&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;--&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;scatter([(censoring_date&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;start_date)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days]&lt;span style=&#34;color:#f92672&#34;&gt;*&lt;/span&gt;samp_cens&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;sum(),np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;where(samp_cens),
+            s&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;50&lt;/span&gt;, facecolors&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;none&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;, edgecolors&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;r&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;axvline((censoring_date&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;start_date)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days, ls&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;--&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;,color&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;r&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;xlabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Days from start&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;, size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;ylabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Different samples&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;, size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;yticks([])
 
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;df.query(&amp;quot;censored==0&amp;quot;)[&#39;T&#39;].mean(), real_T.mean()
-(19.681, 49.236)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;Pictorially, this is how it looks like. We sample 20 rows of data, and plot their individual timelines. Censoring events are the red circles, and the censored part of each observation is the dashed blue line:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;plt.figure(figsize=(9,4))
-n = 20
-samp_df = df.sample(n)
-samp_cens = samp_df[&#39;censored&#39;]
-plt.hlines(np.arange(n), 
-           (samp_df[&#39;Arrival Date&#39;]-start_date).dt.days,
-           (samp_df[&#39;Arrival Date&#39;]-start_date).dt.days + samp_df[&#39;T&#39;],
-           color=&#39;k&#39;)
-plt.hlines(np.where(samp_cens), 
-           (samp_df[samp_cens][&#39;Arrival Date&#39;]-start_date).dt.days + samp_df[samp_cens][&#39;T&#39;],
-           (samp_df[samp_cens][&#39;Real Selling Date&#39;]-start_date).dt.days,
-           color=&#39;darkblue&#39;, ls=&#39;--&#39;)
-plt.scatter([(censoring_date-start_date).days]*samp_cens.sum(),np.where(samp_cens),
-            s=50, facecolors=&#39;none&#39;, edgecolors=&#39;r&#39;)
-plt.axvline((censoring_date-start_date).days, ls=&#39;--&#39;,color=&#39;r&#39;)
-plt.xlabel(&amp;quot;Days from start&amp;quot;, size=15)
-plt.ylabel(&amp;quot;Different samples&amp;quot;, size=15)
-plt.yticks([])
-
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;Obviously, the mean length of the black lines is significantly shorter than that of &lt;em&gt;all&lt;/em&gt; the lines; this is exactly the bias caused by ignoring the censored observations.&lt;/p&gt;
-
-&lt;p&gt;&lt;img src=&#34;output_15_1.png&#34; alt=&#34;png&#34; /&gt;&lt;/p&gt;
-
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Obviously, the mean length of the black lines is significantly shorter than that of &lt;em&gt;all&lt;/em&gt; the lines; this is exactly the bias caused by ignoring the censored observations.&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;output_15_1.png&#34; alt=&#34;png&#34;&gt;&lt;/p&gt;
 &lt;h1 id=&#34;the-model&#34;&gt;The model&lt;/h1&gt;
-
 &lt;p&gt;We assume a simple exponential distribution for the event times distribution:&lt;/p&gt;
-
 &lt;p&gt;$$P_{\lambda}\left(T\right)=\frac{1}{\lambda}e^{-\frac{T}{\lambda}}$$&lt;/p&gt;
-
 &lt;p&gt;In this parametrization, $\lambda$ is the mean time-to-event; we want to infer $\lambda$ from the data.
 We put a $\text{Normal}\left(\mu=3,\sigma=3\right)$ prior on $\log\lambda$, representing our prior belief that diapers aren&amp;rsquo;t sold in nanoseconds nor in geological timescales, and the constraint that $\lambda$ must be positive.&lt;/p&gt;
-
 &lt;p&gt;So, this means that our log probability function is:&lt;/p&gt;
-
 &lt;p&gt;$$\underbrace{\sum_{i=1}^n \log{P_\lambda\left(T=O_i\right)}}_{\text{likelihood of observed}} + \underbrace{\sum_{j=1}^m \log{P_\lambda\left(T&amp;gt;C_j\right)}}_{\text{likelihood of censored}}+\underbrace{\log\text{Normal}\left(\lambda\vert\mu=3,\sigma=3\right)}_{\text{Prior on }\lambda}$$&lt;/p&gt;
-
 &lt;p&gt;The first sum and the last term are easy - we just define an exponential model with the prior we want and feed it with the observed samples. The tricky part is how to handle with the second, censored sum.&lt;/p&gt;
-
 &lt;h1 id=&#34;lccdf&#34;&gt;LCCDF&lt;/h1&gt;
-
 &lt;p&gt;The thing we need to implement in order to feed the right &lt;code&gt;log_prob&lt;/code&gt; function to the sampler is called LCCDF: an intimidating acronym the stands for &lt;strong&gt;L&lt;/strong&gt;og &lt;strong&gt;C&lt;/strong&gt;omplementary  &lt;strong&gt;C&lt;/strong&gt;umulative &lt;strong&gt;D&lt;/strong&gt;ensity &lt;strong&gt;F&lt;/strong&gt;unction. We&amp;rsquo;ll unfold this backwards:&lt;/p&gt;
-
 &lt;ul&gt;
 &lt;li&gt;The cumulative density function (CDF) of our time-to-event distribution is $F_\lambda\left(t\right)=P_\lambda(Tֿ\le t)$.&lt;/li&gt;
 &lt;li&gt;The complmentary CDF (CCDF) is $1-F_\lambda\left(t\right)=P_\lambda(T&amp;gt;t)$;&lt;/li&gt;
 &lt;li&gt;Its log (LCCDF) is $\log P_\lambda(T&amp;gt;t)$, which is exactly what we want.&lt;/li&gt;
 &lt;/ul&gt;
-
-&lt;p&gt;Some LCCDFs are implemented in languages such as Stan (&lt;a href=&#34;https://mc-stan.org/docs/2_18/functions-reference/exponential-distribution.html&#34; target=&#34;_blank&#34;&gt;this&lt;/a&gt; is what we want), but in TFP (currently) we have to implement this ourselves. Luckily, the CDF of the &lt;a href=&#34;https://en.wikipedia.org/wiki/Exponential_distribution#Cumulative_distribution_function&#34; target=&#34;_blank&#34;&gt;exponential distribution&lt;/a&gt; is $1-e^{-\frac{T}{\lambda}}$, which means our LCCDF is super simple - $\log P_\lambda(T&amp;gt;t)=-\frac{T}{\lambda}$. Cases for which we don&amp;rsquo;t have an analytical expression for the LCCDF are trickier to handle; The solution in Sigrid Keydana&amp;rsquo;s &lt;a href=&#34;https://blogs.rstudio.com/tensorflow/posts/2019-07-31-censored-data/&#34; target=&#34;_blank&#34;&gt;post&lt;/a&gt; (using TFP built-in CDF functions) is more general, but I found it less numerically stable, and writing everything explicitly helped me understand what&amp;rsquo;s going on. We&amp;rsquo;ll stick with the simpler case in this introductory post.&lt;/p&gt;
-
+&lt;p&gt;Some LCCDFs are implemented in languages such as Stan (&lt;a href=&#34;https://mc-stan.org/docs/2_18/functions-reference/exponential-distribution.html&#34;&gt;this&lt;/a&gt; is what we want), but in TFP (currently) we have to implement this ourselves. Luckily, the CDF of the &lt;a href=&#34;https://en.wikipedia.org/wiki/Exponential_distribution#Cumulative_distribution_function&#34;&gt;exponential distribution&lt;/a&gt; is $1-e^{-\frac{T}{\lambda}}$, which means our LCCDF is super simple - $\log P_\lambda(T&amp;gt;t)=-\frac{T}{\lambda}$. Cases for which we don&amp;rsquo;t have an analytical expression for the LCCDF are trickier to handle; The solution in Sigrid Keydana&amp;rsquo;s &lt;a href=&#34;https://blogs.rstudio.com/tensorflow/posts/2019-07-31-censored-data/&#34;&gt;post&lt;/a&gt; (using TFP built-in CDF functions) is more general, but I found it less numerically stable, and writing everything explicitly helped me understand what&amp;rsquo;s going on. We&amp;rsquo;ll stick with the simpler case in this introductory post.&lt;/p&gt;
 &lt;p&gt;We now go ahead and implement this:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;#converting the data to tf tensors
-obs_times = tf.convert_to_tensor(df.query(&amp;quot;censored==0&amp;quot;)[&#39;T&#39;])
-cens_times = tf.convert_to_tensor(df.query(&amp;quot;censored==1&amp;quot;)[&#39;T&#39;])
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;This is our model, containing the normal prior on $\log\lambda$ and the exponential likelihood terms. This is pretty straightforward:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;obs_model = tfd.JointDistributionSequential(
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#75715e&#34;&gt;#converting the data to tf tensors&lt;/span&gt;
+obs_times &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;convert_to_tensor(df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;query(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;censored==0&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;)[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;T&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;])
+cens_times &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;convert_to_tensor(df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;query(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;censored==1&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;)[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;T&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;])
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;This is our model, containing the normal prior on $\log\lambda$ and the exponential likelihood terms. This is pretty straightforward:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;obs_model &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;JointDistributionSequential(
   [
-    tfd.Normal(3, 3), #log_rate
-    lambda log_rate:
-      tfd.Independent(tfd.Sample(
-        tfd.Exponential(rate = 
-            1/tf.math.exp(log_rate[:,tf.newaxis])
-        )), reinterpreted_batch_ndims = 1)
+    tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Normal(&lt;span style=&#34;color:#ae81ff&#34;&gt;3&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;3&lt;/span&gt;), &lt;span style=&#34;color:#75715e&#34;&gt;#log_rate&lt;/span&gt;
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;lambda&lt;/span&gt; log_rate:
+      tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Independent(tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Sample(
+        tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Exponential(rate &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; 
+            &lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;/&lt;/span&gt;tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;math&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(log_rate[:,tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis])
+        )), reinterpreted_batch_ndims &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; &lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;)
   ]
 )
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;Now, given a $\log\lambda$, the exponential LCCDF function simply sums $-\frac{T}{\lambda}$ over all censored times. Note that &lt;code&gt;log_rate&lt;/code&gt; has shape &lt;code&gt;(n_chains,)&lt;/code&gt;, and &lt;code&gt;cens_times&lt;/code&gt; has shape &lt;code&gt;(n_cens_times,)&lt;/code&gt;, so we need to add a &lt;code&gt;tf.newaxis&lt;/code&gt; to make sure both are broadcasted along the right dimensions. We also cast &lt;code&gt;cens_times&lt;/code&gt; to float so the division is properly defined.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;def exponential_lccdf(log_rate):
-    return tf.reduce_sum(
-        -tf.cast(cens_times, log_rate.dtype)[tf.newaxis,:]/tf.exp(log_rate[:,tf.newaxis]),
-        axis=-1
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Now, given a $\log\lambda$, the exponential LCCDF function simply sums $-\frac{T}{\lambda}$ over all censored times. Note that &lt;code&gt;log_rate&lt;/code&gt; has shape &lt;code&gt;(n_chains,)&lt;/code&gt;, and &lt;code&gt;cens_times&lt;/code&gt; has shape &lt;code&gt;(n_cens_times,)&lt;/code&gt;, so we need to add a &lt;code&gt;tf.newaxis&lt;/code&gt; to make sure both are broadcasted along the right dimensions. We also cast &lt;code&gt;cens_times&lt;/code&gt; to float so the division is properly defined.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#66d9ef&#34;&gt;def&lt;/span&gt; &lt;span style=&#34;color:#a6e22e&#34;&gt;exponential_lccdf&lt;/span&gt;(log_rate):
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;return&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;reduce_sum(
+        &lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;cast(cens_times, log_rate&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dtype)[tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis,:]&lt;span style=&#34;color:#f92672&#34;&gt;/&lt;/span&gt;tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(log_rate[:,tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis]),
+        axis&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;
     )
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;Finally, we combine the likelihood of the observed times and the prior, which are given by &lt;code&gt;obs_model.log_prob&lt;/code&gt; evaluated at the observed times, and the likelihood of the censored times, which we just defined:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;def log_prob(log_rate):
-    lp = obs_model.log_prob([log_rate, tf.cast(obs_times, log_rate.dtype)[tf.newaxis,:]])
-    censored_likelihood = exponential_lccdf(log_rate)
-    return lp + censored_likelihood
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;We now proceed as usual, by calling our HMC sampler helper function:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;@tf.function
-def sampleHMC(log_prob, inits, bijectors_list = None):
-    inner_kernel=tfp.mcmc.HamiltonianMonteCarlo(
-        target_log_prob_fn=log_prob,
-        step_size=0.1,
-        num_leapfrog_steps=8
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Finally, we combine the likelihood of the observed times and the prior, which are given by &lt;code&gt;obs_model.log_prob&lt;/code&gt; evaluated at the observed times, and the likelihood of the censored times, which we just defined:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#66d9ef&#34;&gt;def&lt;/span&gt; &lt;span style=&#34;color:#a6e22e&#34;&gt;log_prob&lt;/span&gt;(log_rate):
+    lp &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; obs_model&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;log_prob([log_rate, tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;cast(obs_times, log_rate&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dtype)[tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis,:]])
+    censored_likelihood &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; exponential_lccdf(log_rate)
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;return&lt;/span&gt; lp &lt;span style=&#34;color:#f92672&#34;&gt;+&lt;/span&gt; censored_likelihood
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;We now proceed as usual, by calling our HMC sampler helper function:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#a6e22e&#34;&gt;@tf.function&lt;/span&gt;
+&lt;span style=&#34;color:#66d9ef&#34;&gt;def&lt;/span&gt; &lt;span style=&#34;color:#a6e22e&#34;&gt;sampleHMC&lt;/span&gt;(log_prob, inits, bijectors_list &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; None):
+    inner_kernel&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;tfp&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;mcmc&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;HamiltonianMonteCarlo(
+        target_log_prob_fn&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;log_prob,
+        step_size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;0.1&lt;/span&gt;,
+        num_leapfrog_steps&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;8&lt;/span&gt;
     )
-    if bijectors_list is not None:
-        inner_kernel = tfp.mcmc.TransformedTransitionKernel(inner_kernel, bijectors_list)
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;if&lt;/span&gt; bijectors_list &lt;span style=&#34;color:#f92672&#34;&gt;is&lt;/span&gt; &lt;span style=&#34;color:#f92672&#34;&gt;not&lt;/span&gt; None:
+        inner_kernel &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tfp&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;mcmc&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;TransformedTransitionKernel(inner_kernel, bijectors_list)
         
-    adaptive_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
-        inner_kernel=inner_kernel,
-        num_adaptation_steps=800
+    adaptive_kernel &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tfp&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;mcmc&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;SimpleStepSizeAdaptation(
+        inner_kernel&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;inner_kernel,
+        num_adaptation_steps&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;800&lt;/span&gt;
     )
-    return tfp.mcmc.sample_chain(
-        num_results=1000,
-        current_state=inits,
-        kernel=adaptive_kernel,
-        num_burnin_steps=1000,
-        trace_fn=None
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;return&lt;/span&gt; tfp&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;mcmc&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;sample_chain(
+        num_results&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;1000&lt;/span&gt;,
+        current_state&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;inits,
+        kernel&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;adaptive_kernel,
+        num_burnin_steps&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;1000&lt;/span&gt;,
+        trace_fn&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;None
     )
-&lt;/code&gt;&lt;/pre&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;n_chains &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; &lt;span style=&#34;color:#ae81ff&#34;&gt;4&lt;/span&gt;
+initial_log_rate &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; obs_model&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;sample(n_chains)
 
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;n_chains = 4
-initial_log_rate = obs_model.sample(n_chains)
-
-samps = sampleHMC(log_prob, [tf.ones_like(initial_log_rate[0])*3.])
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;Just for comparison, if we call the sampler without the censored likelihood (meaning we &amp;ldquo;throw away&amp;rdquo; the censored observations), this is what we get:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;samps_ignore_censored = sampleHMC(
-    lambda log_rate:obs_model.log_prob([log_rate, tf.cast(obs_times, log_rate.dtype)[tf.newaxis,:]]),
-    [tf.zeros_like(initial_log_rate[0])]
+samps &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; sampleHMC(log_prob, [tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;ones_like(initial_log_rate[&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;])&lt;span style=&#34;color:#f92672&#34;&gt;*&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;3.&lt;/span&gt;])
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Just for comparison, if we call the sampler without the censored likelihood (meaning we &amp;ldquo;throw away&amp;rdquo; the censored observations), this is what we get:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;samps_ignore_censored &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; sampleHMC(
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;lambda&lt;/span&gt; log_rate:obs_model&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;log_prob([log_rate, tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;cast(obs_times, log_rate&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dtype)[tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis,:]]),
+    [tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;zeros_like(initial_log_rate[&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;])]
 )
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;sns.distplot(np.exp(samps[0].numpy().flatten()),label=&#39;With censored&#39;)
-sns.distplot(np.exp(samps_ignore_censored[0].numpy().flatten()),label=&#39;Without censored&#39;)
-plt.axvline(real_T.mean(),ls=&#39;--&#39;,c=&#39;k&#39;,label=&#39;Empirical mean of real T&#39;)
-plt.legend()
-plt.xlabel(&amp;quot;$\lambda$&amp;quot;,size=15)
-plt.ylabel(&#39;Density&#39;,size=15)
-pass
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;&lt;img src=&#34;output_32_0.png&#34; alt=&#34;png&#34; /&gt;&lt;/p&gt;
-
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;sns&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;distplot(np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(samps[&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;numpy()&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;flatten()),label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;With censored&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+sns&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;distplot(np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(samps_ignore_censored[&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;numpy()&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;flatten()),label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Without censored&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;axvline(real_T&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;mean(),ls&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;--&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;,c&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;k&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;,label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Empirical mean of real T&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;legend()
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;xlabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;$&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;\&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;lambda$&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;,size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;ylabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Density&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;,size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+&lt;span style=&#34;color:#66d9ef&#34;&gt;pass&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;img src=&#34;output_32_0.png&#34; alt=&#34;png&#34;&gt;&lt;/p&gt;
 &lt;h1 id=&#34;survival-regression&#34;&gt;Survival regression&lt;/h1&gt;
-
 &lt;p&gt;This was a very simple and cooked-up demonstration of survival analysis, mainly to illustrate how to account for censored observations by adding the necessary LCCDF to the sampler log probability function. However, in many cases what we actually want is to understand how different features affect survival probability. For example, we&amp;rsquo;d like to understand how a given treatment affects the survival probabilities of patients, or the age of customers affects time-to-lapse or whatnot. This is called survival regression.&lt;/p&gt;
-
-&lt;p&gt;Like in the previous posts, I&amp;rsquo;m sticking to the excellent examples from McElreath&amp;rsquo;s Statistical Rethinking book. However, this example is actually not from the book itself, but from &lt;a href=&#34;https://www.youtube.com/watch?v=p7g-CgGCS34&#34; target=&#34;_blank&#34;&gt;Statistical Rethinking Winter 2019 Lecture 13&lt;/a&gt; from 23:43 onwards (you should probably go watch this now, the relevant part is about 10 minutes long).&lt;/p&gt;
-
-&lt;p&gt;The data in this example is from an animal care facility in Austin (&lt;a href=&#34;https://data.austintexas.gov/browse?q=animal&amp;amp;sortBy=relevance&#34; target=&#34;_blank&#34;&gt;source&lt;/a&gt;), and describes cats arrival time to the facility, when/if/how they left, breed, color, age, etc. For us, the event of interest is adoption - we&amp;rsquo;ll try to estimate time-to-adoption. But this time, we&amp;rsquo;re using the cats color as a predictor: we&amp;rsquo;ll compare the adoption times of black cats vs. non-black cats.&lt;/p&gt;
-
+&lt;p&gt;Like in the previous posts, I&amp;rsquo;m sticking to the excellent examples from McElreath&amp;rsquo;s Statistical Rethinking book. However, this example is actually not from the book itself, but from &lt;a href=&#34;https://www.youtube.com/watch?v=p7g-CgGCS34&#34;&gt;Statistical Rethinking Winter 2019 Lecture 13&lt;/a&gt; from 23:43 onwards (you should probably go watch this now, the relevant part is about 10 minutes long).&lt;/p&gt;
+&lt;p&gt;The data in this example is from an animal care facility in Austin (&lt;a href=&#34;https://data.austintexas.gov/browse?q=animal&amp;amp;sortBy=relevance&#34;&gt;source&lt;/a&gt;), and describes cats arrival time to the facility, when/if/how they left, breed, color, age, etc. For us, the event of interest is adoption - we&amp;rsquo;ll try to estimate time-to-adoption. But this time, we&amp;rsquo;re using the cats color as a predictor: we&amp;rsquo;ll compare the adoption times of black cats vs. non-black cats.&lt;/p&gt;
 &lt;p&gt;We&amp;rsquo;re using the same data as McElreath (who kindly supplied both the data and the .R script containing the processing):&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#75715e&#34;&gt;# references to original data (from the email)&lt;/span&gt;
+df &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; pd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;read_csv(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;https://raw.githubusercontent.com/adamhaber/adamhaber.github.io/master/assets/AustinCats.csv&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;, delimiter&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;black&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;] &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;color&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;apply(&lt;span style=&#34;color:#66d9ef&#34;&gt;lambda&lt;/span&gt; x: x&lt;span style=&#34;color:#f92672&#34;&gt;==&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Black&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+df[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;adopted&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;] &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;out_event&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;apply(&lt;span style=&#34;color:#66d9ef&#34;&gt;lambda&lt;/span&gt; x: x&lt;span style=&#34;color:#f92672&#34;&gt;==&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Adoption&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
 
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;# references to original data (from the email)
-df = pd.read_csv(&amp;quot;https://raw.githubusercontent.com/adamhaber/adamhaber.github.io/master/assets/AustinCats.csv&amp;quot;, delimiter=&#39;;&#39;)
-&lt;/code&gt;&lt;/pre&gt;
+is_black_cens &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;convert_to_tensor(df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;query(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;adopted==0&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;black&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;values&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;astype(float))
+is_black_obs &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;convert_to_tensor(df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;query(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;adopted==1&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;black&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;values&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;astype(float))
 
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;df[&#39;black&#39;] = df.color.apply(lambda x: x==&#39;Black&#39;)
-df[&#39;adopted&#39;] = df.out_event.apply(lambda x: x==&#39;Adoption&#39;)
-
-is_black_cens = tf.convert_to_tensor(df.query(&#39;adopted==0&#39;).black.values.astype(float))
-is_black_obs = tf.convert_to_tensor(df.query(&#39;adopted==1&#39;).black.values.astype(float))
-
-y_cens = tf.convert_to_tensor(df.query(&#39;adopted==0&#39;).days_to_event)
-y_obs = tf.convert_to_tensor(df.query(&#39;adopted==1&#39;).days_to_event)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;The model is very similar to our made-up example from before - the only thing that&amp;rsquo;s different is that now $\log\lambda$ is a simple linear function:&lt;/p&gt;
-
+y_cens &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;convert_to_tensor(df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;query(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;adopted==0&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days_to_event)
+y_obs &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;convert_to_tensor(df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;query(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;adopted==1&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days_to_event)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The model is very similar to our made-up example from before - the only thing that&amp;rsquo;s different is that now $\log\lambda$ is a simple linear function:&lt;/p&gt;
 &lt;p&gt;$$\log\lambda = \alpha+\beta\cdot\text{is_black}$$&lt;/p&gt;
-
 &lt;p&gt;$\text{is_black}$ equals one for black cats, and zero otherwise, which means the log rate equals $\alpha+\beta$ for black cats and $\alpha$ otherwise. So, instead of estimating $\log\lambda$ directly, we&amp;rsquo;re estimating the parameters of this simple linear model. The prior for the intercept is the same as in the previous example, and the prior for the slope is centered around zero (we don&amp;rsquo;t have a-priori reason to believe black cats are bigoted against), and of the same scale.&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;obs_model = tfd.JointDistributionSequential(
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;obs_model &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;JointDistributionSequential(
   [
-    tfd.Normal(3, 3), #alpha
-    tfd.Normal(0, 3), #beta
-    lambda beta, alpha:
-      tfd.Independent(tfd.Sample(
-        tfd.Exponential(rate = 
-            1/tf.math.exp(tf.cast(is_black_obs[tf.newaxis,:], beta.dtype)*beta[:,tf.newaxis]+\
-                        alpha[:,tf.newaxis])
-        )), reinterpreted_batch_ndims = 1)
+    tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Normal(&lt;span style=&#34;color:#ae81ff&#34;&gt;3&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;3&lt;/span&gt;), &lt;span style=&#34;color:#75715e&#34;&gt;#alpha&lt;/span&gt;
+    tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Normal(&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;3&lt;/span&gt;), &lt;span style=&#34;color:#75715e&#34;&gt;#beta&lt;/span&gt;
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;lambda&lt;/span&gt; beta, alpha:
+      tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Independent(tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Sample(
+        tfd&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;Exponential(rate &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; 
+            &lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;/&lt;/span&gt;tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;math&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;cast(is_black_obs[tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis,:], beta&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dtype)&lt;span style=&#34;color:#f92672&#34;&gt;*&lt;/span&gt;beta[:,tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis]&lt;span style=&#34;color:#f92672&#34;&gt;+&lt;/span&gt;\
+                        alpha[:,tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis])
+        )), reinterpreted_batch_ndims &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; &lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;)
   ]
 )
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;The LCCDF function is again very similar, but this time in the denominator we have our simple linear function and not just a single parameter:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;def exponential_lccdf(alpha, beta):
-    return tf.reduce_sum(
-        -tf.cast(y_cens[tf.newaxis,:],alpha.dtype) / tf.exp(tf.cast(is_black_cens[tf.newaxis,:], beta.dtype) * beta[:,tf.newaxis] + alpha[:,tf.newaxis]),
-        axis=-1
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;The LCCDF function is again very similar, but this time in the denominator we have our simple linear function and not just a single parameter:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#66d9ef&#34;&gt;def&lt;/span&gt; &lt;span style=&#34;color:#a6e22e&#34;&gt;exponential_lccdf&lt;/span&gt;(alpha, beta):
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;return&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;reduce_sum(
+        &lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;cast(y_cens[tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis,:],alpha&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dtype) &lt;span style=&#34;color:#f92672&#34;&gt;/&lt;/span&gt; tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;cast(is_black_cens[tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis,:], beta&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dtype) &lt;span style=&#34;color:#f92672&#34;&gt;*&lt;/span&gt; beta[:,tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis] &lt;span style=&#34;color:#f92672&#34;&gt;+&lt;/span&gt; alpha[:,tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis]),
+        axis&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;
     )
-&lt;/code&gt;&lt;/pre&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;log_prob&lt;/code&gt; is exactly the same, and so is the code for calling the sampler:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#66d9ef&#34;&gt;def&lt;/span&gt; &lt;span style=&#34;color:#a6e22e&#34;&gt;log_prob&lt;/span&gt;(alpha, beta):
+    lp &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; obs_model&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;log_prob([alpha, beta, tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;cast(y_obs, alpha&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;dtype)[tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;newaxis,:]])
+    potential &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;  exponential_lccdf(alpha, beta)
+    &lt;span style=&#34;color:#66d9ef&#34;&gt;return&lt;/span&gt; lp &lt;span style=&#34;color:#f92672&#34;&gt;+&lt;/span&gt; potential
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;n_chains &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; &lt;span style=&#34;color:#ae81ff&#34;&gt;4&lt;/span&gt;
+initial_coeffs &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; obs_model&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;sample(n_chains)
+alphas, betas &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; sampleHMC(log_prob, [tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;zeros_like(initial_coeffs[&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;]), tf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;zeros_like(initial_coeffs[&lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;])])
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;We convert samples back to &lt;code&gt;numpy&lt;/code&gt; for easier plotting, and compute the corresponding rates:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;alphas &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; alphas&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;numpy()&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;flatten()
+betas &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; betas&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;numpy()&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;flatten()
 
-&lt;p&gt;&lt;code&gt;log_prob&lt;/code&gt; is exactly the same, and so is the code for calling the sampler:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;def log_prob(alpha, beta):
-    lp = obs_model.log_prob([alpha, beta, tf.cast(y_obs, alpha.dtype)[tf.newaxis,:]])
-    potential =  exponential_lccdf(alpha, beta)
-    return lp + potential
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;n_chains = 4
-initial_coeffs = obs_model.sample(n_chains)
-alphas, betas = sampleHMC(log_prob, [tf.zeros_like(initial_coeffs[0]), tf.zeros_like(initial_coeffs[1])])
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;We convert samples back to &lt;code&gt;numpy&lt;/code&gt; for easier plotting, and compute the corresponding rates:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;alphas = alphas.numpy().flatten()
-betas = betas.numpy().flatten()
-
-lambda_black = np.exp(alphas + betas)
-lambda_non_black = np.exp(alphas)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;sns.distplot(lambda_black,color=&#39;k&#39;,label=&#39;black&#39;)
-sns.distplot(lambda_non_black,color=&#39;orange&#39;,label=&#39;non black&#39;)
-plt.legend(fontsize=15)
-plt.xlabel(&amp;quot;Days to adoption&amp;quot;,size=15)
-plt.ylabel(&amp;quot;Density&amp;quot;,size=15)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;&lt;img src=&#34;output_49_1.png&#34; alt=&#34;png&#34; /&gt;&lt;/p&gt;
-
+lambda_black &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(alphas &lt;span style=&#34;color:#f92672&#34;&gt;+&lt;/span&gt; betas)
+lambda_non_black &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(alphas)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;sns&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;distplot(lambda_black,color&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;k&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;,label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;black&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+sns&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;distplot(lambda_non_black,color&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;orange&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;,label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;non black&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;legend(fontsize&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;xlabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Days to adoption&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;,size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;ylabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Density&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;,size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;img src=&#34;output_49_1.png&#34; alt=&#34;png&#34;&gt;&lt;/p&gt;
 &lt;p&gt;It turns out people &lt;em&gt;are&lt;/em&gt; biased against black cats! We can also use the inferred rates to plot one of the central quantities of interest in survival analysis - the &lt;strong&gt;survival function&lt;/strong&gt;. The survival function is simply the CCDF from before:&lt;/p&gt;
-
 &lt;p&gt;$$S(t) = P(T&amp;gt;t)$$&lt;/p&gt;
-
 &lt;p&gt;$S(t)$ quantifies the probability of surviving longer than $t$. For the minimal possible duration (0 in our case), $S(0)=1$, and $S(\infty)=0$ (everyone dies). We can use the inferred rates to plot the estimated survival curves:&lt;/p&gt;
-
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;t = np.linspace(0,200)
-for lam_nb, lam_b in zip(lambda_non_black[:100], lambda_black[:100]):
-    plt.plot(t, np.exp(-t/lam_nb),c=&#39;orange&#39;, alpha=0.1)    
-    plt.plot(t, np.exp(-t/lam_b),c=&#39;black&#39;, alpha=0.1)    
-plt.ylabel(&amp;quot;Proportion remaining&amp;quot;)
-plt.xlabel(&amp;quot;Days&amp;quot;)
-legend_elements = [Line2D([0], [0], color=&#39;black&#39;, label=&#39;black&#39;),
-                   Line2D([0], [0], color=&#39;orange&#39;, label=&#39;orange&#39;)]
-plt.legend(handles=legend_elements,fontsize=15)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;&lt;img src=&#34;output_51_1.png&#34; alt=&#34;png&#34; /&gt;&lt;/p&gt;
-
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;t &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;linspace(&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;,&lt;span style=&#34;color:#ae81ff&#34;&gt;200&lt;/span&gt;)
+&lt;span style=&#34;color:#66d9ef&#34;&gt;for&lt;/span&gt; lam_nb, lam_b &lt;span style=&#34;color:#f92672&#34;&gt;in&lt;/span&gt; zip(lambda_non_black[:&lt;span style=&#34;color:#ae81ff&#34;&gt;100&lt;/span&gt;], lambda_black[:&lt;span style=&#34;color:#ae81ff&#34;&gt;100&lt;/span&gt;]):
+    plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;plot(t, np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;t&lt;span style=&#34;color:#f92672&#34;&gt;/&lt;/span&gt;lam_nb),c&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;orange&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;, alpha&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;0.1&lt;/span&gt;)    
+    plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;plot(t, np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;t&lt;span style=&#34;color:#f92672&#34;&gt;/&lt;/span&gt;lam_b),c&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;black&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;, alpha&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;0.1&lt;/span&gt;)    
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;ylabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Proportion remaining&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;xlabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Days&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;)
+legend_elements &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; [Line2D([&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;], [&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;], color&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;black&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;, label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;black&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;),
+                   Line2D([&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;], [&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;], color&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;orange&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;, label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;orange&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)]
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;legend(handles&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;legend_elements,fontsize&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;img src=&#34;output_51_1.png&#34; alt=&#34;png&#34;&gt;&lt;/p&gt;
 &lt;p&gt;&amp;hellip; which is the same plot as in the lecture.&lt;/p&gt;
-
-&lt;h1 id=&#34;overthinking-box-kaplan-meier-non-parametric-estimator&#34;&gt;Overthinking box - Kaplan Meier non-parametric estimator&lt;/h1&gt;
-
+&lt;h1 id=&#34;overthinking-box---kaplan-meier-non-parametric-estimator&#34;&gt;Overthinking box - Kaplan Meier non-parametric estimator&lt;/h1&gt;
 &lt;p&gt;In all we&amp;rsquo;ve done so far, we&amp;rsquo;ve assumed a specific parametric form for the durations distributions&amp;hellip; but how can we check if this assumption makes any sense? One way is to compare it to a non-parametric estimator of the survival function.&lt;/p&gt;
-
 &lt;p&gt;The Kaplan-Meier estimator is a non-parametric estimator that does just that. It is defined as follows:&lt;/p&gt;
-
 &lt;p&gt;$$S_{KM}\left(t\right) = \prod_{t_i&amp;lt;t}{\left(1-\frac{d_i}{n_i}\right)}$$&lt;/p&gt;
-
 &lt;p&gt;Where $t_i$ are all the event times smaller than $t$ (from the data itself); $n_i$ is the number of people &amp;ldquo;at risk&amp;rdquo; between $t_{i-1}$ and $t_i$ (which means they survived all the events up to and including $t_{i-1}$); and $d_i$ is the number of observed deaths at time $t_i$ (deaths at the interval $\left(t_{i-1},t_i\right]$).&lt;/p&gt;
-
 &lt;p&gt;This formula has a pretty intuitive explanation - surviving up to time $t$ means surviving all the events before $t$;
 For each such event, in which $d_i$ out of $n_i$ subjects died, the estimated survival probability is $1-\frac{d_i}{n_i}$, so surviving &lt;em&gt;all of them&lt;/em&gt; is the product of all these numbers.&lt;/p&gt;
-
-&lt;p&gt;Instead of implementing KM estimator ourselves, we&amp;rsquo;ll use the wonderful &lt;a href=&#34;https://lifelines.readthedocs.io/en/latest/index.html&#34; target=&#34;_blank&#34;&gt;lifelines&lt;/a&gt; library, which is the most comprehensive python package for survival analysis I know of (R has a much better survival analysis ecosystem). Implementation is easy, but if you&amp;rsquo;re interested in survival analysis, you should check out &lt;code&gt;lifelines&lt;/code&gt;; it has a wonderful API, great docs and a wide range of models, helper functions, plotting and summary statistics.&lt;/p&gt;
-
+&lt;p&gt;Instead of implementing KM estimator ourselves, we&amp;rsquo;ll use the wonderful &lt;a href=&#34;https://lifelines.readthedocs.io/en/latest/index.html&#34;&gt;lifelines&lt;/a&gt; library, which is the most comprehensive python package for survival analysis I know of (R has a much better survival analysis ecosystem). Implementation is easy, but if you&amp;rsquo;re interested in survival analysis, you should check out &lt;code&gt;lifelines&lt;/code&gt;; it has a wonderful API, great docs and a wide range of models, helper functions, plotting and summary statistics.&lt;/p&gt;
 &lt;p&gt;We&amp;rsquo;ll fit two KM estimators - one for black cats and one for non-black cats, so we can compare the non-parametric to our parametric survival functions:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#f92672&#34;&gt;from&lt;/span&gt; lifelines &lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; KaplanMeierFitter
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;figure(figsize&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;(&lt;span style=&#34;color:#ae81ff&#34;&gt;9&lt;/span&gt;,&lt;span style=&#34;color:#ae81ff&#34;&gt;9&lt;/span&gt;))
+ax &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;subplot(&lt;span style=&#34;color:#ae81ff&#34;&gt;111&lt;/span&gt;)
 
-&lt;pre&gt;&lt;code class=&#34;language-python&#34;&gt;from lifelines import KaplanMeierFitter
-plt.figure(figsize=(9,9))
-ax = plt.subplot(111)
+kmf &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; KaplanMeierFitter()
+kmf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;fit(df[df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;black&lt;span style=&#34;color:#f92672&#34;&gt;==&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days_to_event, event_observed&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;df[df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;black&lt;span style=&#34;color:#f92672&#34;&gt;==&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;adopted,label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;black cats&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+kmf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;plot(ax&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;ax,c&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;k&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+kmf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;fit(df[df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;black&lt;span style=&#34;color:#f92672&#34;&gt;==&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;days_to_event, event_observed&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;df[df&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;black&lt;span style=&#34;color:#f92672&#34;&gt;==&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;]&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;adopted,label&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;non black cats&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
+kmf&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;plot(ax&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;ax,c&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;orange&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;)
 
-kmf = KaplanMeierFitter()
-kmf.fit(df[df.black==1].days_to_event, event_observed=df[df.black==1].adopted,label=&#39;black cats&#39;)
-kmf.plot(ax=ax,c=&#39;k&#39;)
-kmf.fit(df[df.black==0].days_to_event, event_observed=df[df.black==0].adopted,label=&#39;non black cats&#39;)
-kmf.plot(ax=ax,c=&#39;orange&#39;)
-
-for lam_nb, lam_b in zip(lambda_non_black[:100], lambda_black[:100]):
-    plt.plot(t, np.exp(-t/lam_nb),c=&#39;orange&#39;, alpha=0.1)    
-    plt.plot(t, np.exp(-t/lam_b),c=&#39;black&#39;, alpha=0.1)    
-plt.ylabel(&amp;quot;Proportion remaining&amp;quot;,size=15)
-plt.xlabel(&amp;quot;Days&amp;quot;,size=15)
-plt.legend(fontsize=15)
-plt.xlim(0, 100)
-&lt;/code&gt;&lt;/pre&gt;
-
-&lt;p&gt;&lt;img src=&#34;output_58_1.png&#34; alt=&#34;png&#34; /&gt;&lt;/p&gt;
-
+&lt;span style=&#34;color:#66d9ef&#34;&gt;for&lt;/span&gt; lam_nb, lam_b &lt;span style=&#34;color:#f92672&#34;&gt;in&lt;/span&gt; zip(lambda_non_black[:&lt;span style=&#34;color:#ae81ff&#34;&gt;100&lt;/span&gt;], lambda_black[:&lt;span style=&#34;color:#ae81ff&#34;&gt;100&lt;/span&gt;]):
+    plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;plot(t, np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;t&lt;span style=&#34;color:#f92672&#34;&gt;/&lt;/span&gt;lam_nb),c&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;orange&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;, alpha&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;0.1&lt;/span&gt;)    
+    plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;plot(t, np&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;exp(&lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;t&lt;span style=&#34;color:#f92672&#34;&gt;/&lt;/span&gt;lam_b),c&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;black&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;, alpha&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;0.1&lt;/span&gt;)    
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;ylabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Proportion remaining&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;,size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;xlabel(&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;Days&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;,size&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;legend(fontsize&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;)
+plt&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;xlim(&lt;span style=&#34;color:#ae81ff&#34;&gt;0&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;100&lt;/span&gt;)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;img src=&#34;output_58_1.png&#34; alt=&#34;png&#34;&gt;&lt;/p&gt;
 &lt;p&gt;What are we seeing here?&lt;/p&gt;
-
 &lt;ol&gt;
 &lt;li&gt;The &amp;ldquo;smooth&amp;rdquo; black and orange curves are exponential survival curves with the sampled parameters.&lt;/li&gt;
-&lt;li&gt;The &amp;ldquo;staircase&amp;rdquo; curves (aka piecewise constant functions) are the non parametric KM estimates. For details about their confidence intervals, see &lt;a href=&#34;https://www.math.wustl.edu/%7Esawyer/handouts/greenwood.pdf&#34; target=&#34;_blank&#34;&gt;here&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;The &amp;ldquo;staircase&amp;rdquo; curves (aka piecewise constant functions) are the non parametric KM estimates. For details about their confidence intervals, see &lt;a href=&#34;https://www.math.wustl.edu/%7Esawyer/handouts/greenwood.pdf&#34;&gt;here&lt;/a&gt;.&lt;/li&gt;
 &lt;/ol&gt;
-
 &lt;p&gt;So, how good is our assumed parametric form? That, of course, depends on how much you care about capturing all the small details; It seems to capture the overall trend, but, for example, it doesn&amp;rsquo;t quite capture the &amp;ldquo;sigmoidal&amp;rdquo;-like behavior around days 0-10, and it overestimates the survival probability between days 60-100 for both groups. This is somewhat expected - we&amp;rsquo;d be surprised if a single-parameter model would be able to capture all the details we see in the non-parametric curve.&lt;/p&gt;
-
 &lt;h1 id=&#34;summing-up&#34;&gt;Summing up&lt;/h1&gt;
-
 &lt;p&gt;This post was pretty introductory - its main goal was to explain what censorship is (I think this is a super important concept to understand if you&amp;rsquo;re doing any kind of data analysis), and to implement a likelihood function that can handle censored observations. In the next post we&amp;rsquo;ll dive a little deeper into survival regression, still from a bayesian modeling persepctive.&lt;/p&gt;
-&lt;div class=&#34;footnotes&#34;&gt;
-
-&lt;hr /&gt;
-
+&lt;section class=&#34;footnotes&#34; role=&#34;doc-endnotes&#34;&gt;
+&lt;hr&gt;
 &lt;ol&gt;
-&lt;li id=&#34;fn:1&#34;&gt;One possible source of confusion here is the terminology; you will find the expressions &amp;ldquo;censored observations&amp;rdquo;, &amp;ldquo;censored times&amp;rdquo;, &amp;ldquo;events whose time were censored&amp;rdquo;, etc. used pretty interchangeably. Unless stated otherwise, all of these usually refer to same thing.
- &lt;a class=&#34;footnote-return&#34; href=&#34;#fnref:1&#34;&gt;&lt;sup&gt;^&lt;/sup&gt;&lt;/a&gt;&lt;/li&gt;
-&lt;li id=&#34;fn:2&#34;&gt;Technically, these are called &amp;ldquo;right censored&amp;rdquo; diapers; if you think of time as going from left to right like it&amp;rsquo;s usually plotted, than the right &amp;ldquo;tail&amp;rdquo; of the plots for these diapers is censored from us. There are also other kinds of censoring, but we&amp;rsquo;ll ignore them in this post.
- &lt;a class=&#34;footnote-return&#34; href=&#34;#fnref:2&#34;&gt;&lt;sup&gt;^&lt;/sup&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li id=&#34;fn:1&#34; role=&#34;doc-endnote&#34;&gt;
+&lt;p&gt;One possible source of confusion here is the terminology; you will find the expressions &amp;ldquo;censored observations&amp;rdquo;, &amp;ldquo;censored times&amp;rdquo;, &amp;ldquo;events whose time were censored&amp;rdquo;, etc. used pretty interchangeably. Unless stated otherwise, all of these usually refer to same thing. &lt;a href=&#34;#fnref:1&#34; class=&#34;footnote-backref&#34; role=&#34;doc-backlink&#34;&gt;&amp;#x21a9;&amp;#xfe0e;&lt;/a&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li id=&#34;fn:2&#34; role=&#34;doc-endnote&#34;&gt;
+&lt;p&gt;Technically, these are called &amp;ldquo;right censored&amp;rdquo; diapers; if you think of time as going from left to right like it&amp;rsquo;s usually plotted, than the right &amp;ldquo;tail&amp;rdquo; of the plots for these diapers is censored from us. There are also other kinds of censoring, but we&amp;rsquo;ll ignore them in this post. &lt;a href=&#34;#fnref:2&#34; class=&#34;footnote-backref&#34; role=&#34;doc-backlink&#34;&gt;&amp;#x21a9;&amp;#xfe0e;&lt;/a&gt;&lt;/p&gt;
+&lt;/li&gt;
 &lt;/ol&gt;
-&lt;/div&gt;
+&lt;/section&gt;
 </description>
     </item>
     

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Stan | Adam Haber</title>
+    <link>https://adamhaber.github.io/tags/stan/</link>
+      <atom:link href="https://adamhaber.github.io/tags/stan/index.xml" rel="self" type="application/rss+xml" />
+    <description>Stan</description>
+    <generator>Source Themes Academic (https://sourcethemes.com/academic/)</generator><language>en-us</language><lastBuildDate>Thu, 21 May 2020 00:00:00 +0000</lastBuildDate>
+    <image>
+      <url>https://adamhaber.github.io/img/icon-192.png</url>
+      <title>Stan</title>
+      <link>https://adamhaber.github.io/tags/stan/</link>
+    </image>
+    
+    <item>
+      <title>Introducing Stan2tfp - a lightweight interface for the Stan-to-TensorFlow Probability compiler</title>
+      <link>https://adamhaber.github.io/post/stan2tfp-post1/</link>
+      <pubDate>Thu, 21 May 2020 00:00:00 +0000</pubDate>
+      <guid>https://adamhaber.github.io/post/stan2tfp-post1/</guid>
+      <description>&lt;h1 id=&#34;tldr&#34;&gt;TL;DR&lt;/h1&gt;
+&lt;p&gt;The new &lt;a href=&#34;https://github.com/stan-dev/stanc3&#34;&gt;Stan compiler&lt;/a&gt; has an alternative backend that allows you to do this:&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;stan2tfp.pdf&#34; alt=&#34;pdf&#34;&gt;&lt;/p&gt;
+&lt;p&gt;stan2tfp is a lightwight interface for this compiler, that allows you to do this with one line of code, and fit the model to data with another.&lt;/p&gt;
+&lt;h2 id=&#34;why-stan2tfp&#34;&gt;Why Stan2tfp&lt;/h2&gt;
+&lt;p&gt;In short - to get the convenience of Stan programs and the scalability of TensorFlow. The model is written in Stan, which means you get a lot of the benefits of having the Stan compiler behind your shoulder (types, bounds, etc). This comes practically for free, since there&amp;rsquo;s no C++ compilation. After the model is converted to TensorFlow Probability code, you sit on top of the entire TF infrastructure, which has many advantages. For example, moving from 4 chains to more than a thousand is &lt;a href=&#34;https://colindcarroll.com/2019/08/18/very-parallel-mcmc-sampling/&#34;&gt;practically free&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;Note that the TFP backend of the Stan compiler is still in its infancy. It only supports a subset of the distributions covered by Stan, and only minimal parts of the language. Expect bugs and sharp edges. Please help by trying it out, reporting bugs, and letting me know what you think!&lt;/p&gt;
+&lt;h2 id=&#34;how-stan2tfp-works&#34;&gt;How stan2tfp works&lt;/h2&gt;
+&lt;p&gt;stan2tfp is just a wrapper, it doesn&amp;rsquo;t do anything smart by itself; all the actual work is done by the &lt;a href=&#34;https://github.com/stan-dev/stanc3&#34;&gt;compiler&lt;/a&gt;, which was written the Stan Development Team. The core functionality can be summarized as follows:&lt;/p&gt;
+&lt;h3 id=&#34;code-generation&#34;&gt;Code generation&lt;/h3&gt;
+&lt;p&gt;We first create a Stan2tfp Python object. It &amp;ldquo;eats&amp;rdquo; a Stan program (string/file), calls the compiler, &amp;ldquo;catches&amp;rdquo; the emitted TFP code (from stdout) and saves it as a Python string. In the process, it checks for the compiler - if it&amp;rsquo;s not found, stan2tfp will download it for you. This only needs to happen once.&lt;/p&gt;
+&lt;h3 id=&#34;evaluation-by-the-interpreter&#34;&gt;Evaluation by the interpreter&lt;/h3&gt;
+&lt;p&gt;The string that represents the model is then &lt;code&gt;eval&lt;/code&gt;ed by the Python interpreter. This creates a Python object in the current namespace. Not that the model is still not instantiated - we haven&amp;rsquo;t passed any data, so we can&amp;rsquo;t sample from the model. The &lt;code&gt;eval&lt;/code&gt; is packed within the constructor, and the compiler doesn&amp;rsquo;t emit any &amp;ldquo;hazardous code&amp;rdquo;, so using it is safe.&lt;/p&gt;
+&lt;h3 id=&#34;instantiating-and-fitting-the-model&#34;&gt;Instantiating and fitting the model&lt;/h3&gt;
+&lt;p&gt;To fit the model, we need to pass a data dictionary either to the &lt;code&gt;Stan2tfp&lt;/code&gt; constructor, or to the &lt;code&gt;init_model&lt;/code&gt; function. After the data is passed, we can call &lt;code&gt;sample&lt;/code&gt;, which wraps TFP&amp;rsquo;s MCMC machinery, aiming for sensible defaults and ease-of-use. At this point, we left Stan-world completely, and everything is TFP-ed - the model, the inference algorithm, etc.&lt;/p&gt;
+&lt;h2 id=&#34;basic-example&#34;&gt;Basic example&lt;/h2&gt;
+&lt;p&gt;To illustrate the basic functionallity, we&amp;rsquo;ll fit the eight schools model (the &amp;ldquo;hello world&amp;rdquo; of bayesian models) using stan2tfp.&lt;/p&gt;
+&lt;p&gt;We begin by importing the Stan2tfp object, and some plotting functionality:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#f92672&#34;&gt;from&lt;/span&gt; stan2tfp &lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; Stan2tfp
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; seaborn &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; sns
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; matplotlib.pyplot &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; plt
+&lt;span style=&#34;color:#f92672&#34;&gt;import&lt;/span&gt; arviz &lt;span style=&#34;color:#f92672&#34;&gt;as&lt;/span&gt; az
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Here&amp;rsquo;s the original Stan model:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;&lt;span style=&#34;color:#960050;background-color:#1e0010&#34;&gt;!&lt;/span&gt;cat eight_schools&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;stan
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;pre&gt;&lt;code&gt;data {
+  int&amp;lt;lower=0&amp;gt; J;
+  real y[J];
+  real&amp;lt;lower=0&amp;gt; sigma[J];
+}
+
+parameters {
+  real mu;
+  real&amp;lt;lower=0&amp;gt; tau;
+  vector[J] theta_tilde;
+}
+
+transformed parameters {
+  vector[J] theta = mu + tau * theta_tilde;
+}
+
+model {
+  mu ~ normal(0, 5);
+  tau ~ normal(0, 5);
+  theta_tilde ~ normal(0, 1);
+  y ~ normal(theta, sigma);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The data is specified using a Python dictionary:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;eight_schools_data_dict &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; dict(
+    J&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;8&lt;/span&gt;,
+    y&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;[&lt;span style=&#34;color:#ae81ff&#34;&gt;28&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;8&lt;/span&gt;, &lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;3&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;7&lt;/span&gt;, &lt;span style=&#34;color:#f92672&#34;&gt;-&lt;/span&gt;&lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;1&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;18&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;12&lt;/span&gt;],
+    sigma&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;[&lt;span style=&#34;color:#ae81ff&#34;&gt;15&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;10&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;16&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;11&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;9&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;11&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;10&lt;/span&gt;, &lt;span style=&#34;color:#ae81ff&#34;&gt;18&lt;/span&gt;]
+)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;Finally, the model object itself is created:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;model &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; Stan2tfp(stan_file_path&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;eight_schools.stan&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#34;&lt;/span&gt;, data_dict&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;eight_schools_data_dict)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;pre&gt;&lt;code&gt;Downloading the latest stan2tfp compiler...
+Download complete, saved to: /Users/adamhaber/projects/stan2tfp/stan2tfp/stan2tfp_compiler.exe
+Compiling stan file to tfp file...
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The emitted TFP code is accessible via &lt;code&gt;get_tfp_code()&lt;/code&gt; (see the picture at the top of the post). This code is then &lt;code&gt;eval&lt;/code&gt;ed by the interpreter and creates the necessary &lt;em&gt;Python&lt;/em&gt; objects in the current namespace. We can now call &lt;code&gt;sample&lt;/code&gt; to fit the model:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;mcmc_trace, kernel_results &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; model&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;sample()
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;code&gt;model.sample&lt;/code&gt; returns the actual samples (&lt;code&gt;mcmc_trace&lt;/code&gt;) and TFP&amp;rsquo;s &lt;code&gt;kernel_results&lt;/code&gt; (holding important sampler diagnostics). Since we&amp;rsquo;re in TFP-world now, we can use any tool from the TFP ecosystem we like; specifically, we can use the excellent &lt;a href=&#34;https://arviz-devs.github.io&#34;&gt;Arviz&lt;/a&gt; library for plotting the results:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-python&#34; data-lang=&#34;python&#34;&gt;data_for_az &lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt; az&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;from_tfp(posterior&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;mcmc_trace, var_names&lt;span style=&#34;color:#f92672&#34;&gt;=&lt;/span&gt;[&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;mu&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;,&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;trace&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;,&lt;span style=&#34;color:#e6db74&#34;&gt;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;theta_tilde&lt;/span&gt;&lt;span style=&#34;color:#e6db74&#34;&gt;&amp;#39;&lt;/span&gt;])
+az&lt;span style=&#34;color:#f92672&#34;&gt;.&lt;/span&gt;plot_forest(data_for_az)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;p&gt;&lt;img src=&#34;output_19_1.png&#34; alt=&#34;png&#34;&gt;&lt;/p&gt;
+&lt;p&gt;That&amp;rsquo;s it. I&amp;rsquo;ll probably post some benchmarks and comparisons in the near future.&lt;/p&gt;
+</description>
+    </item>
+    
+  </channel>
+</rss>

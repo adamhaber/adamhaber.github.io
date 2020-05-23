@@ -490,78 +490,55 @@
   <div class="article-container">
 
     <div class="article-style">
-      
-
-<h2 id="tl-dr">TL;DR</h2>
-
+      <h2 id="tldr">TL;DR</h2>
 <p>We&rsquo;ll:</p>
-
 <ul>
 <li>Learn an interesting method for generalizing inferences from a biased sample to a population of interest</li>
 <li>See why prior predictive checks are great</li>
 <li>Implement a simple mixed-effects model in TFP</li>
 </ul>
-
 <h1 id="intro">Intro</h1>
-
-<p>This post is a TFP port of Lauren Kennedy and Jonah Gabry&rsquo;s excellent <a href="http://mc-stan.org/rstanarm/articles/mrp.html" target="_blank">MRP with rstanarm</a> vignette. It describes a very interesting statistical method for generalizing inferences from a biased sample to a population of interest. The method is called multilevel regression with poststratification, or MRP if you prefer acronyms, or Mister P if you prefer statisticians jokes. Along the way, we&rsquo;ll see why prior predictive checks are so nice and important, how to implement a mixed-effect model in TFP, and how to make predictions for smaller sub-populations.</p>
-
+<p>This post is a TFP port of Lauren Kennedy and Jonah Gabry&rsquo;s excellent <a href="http://mc-stan.org/rstanarm/articles/mrp.html">MRP with rstanarm</a> vignette. It describes a very interesting statistical method for generalizing inferences from a biased sample to a population of interest. The method is called multilevel regression with poststratification, or MRP if you prefer acronyms, or Mister P if you prefer statisticians jokes. Along the way, we&rsquo;ll see why prior predictive checks are so nice and important, how to implement a mixed-effect model in TFP, and how to make predictions for smaller sub-populations.</p>
 <p>I chose to port the vignette because the problem MRP address - generalizing from a biased sample to a population - is so prevalent and important, that knowing what are the possible tools to handle it seemed valuable. I found that porting models from one language to another is an excellent way to learn the model, the problem, and the languages themselves, so it&rsquo;s kind of a win-win-win and publishing it might also help others so why not.</p>
-
 <p>I strongly recommend reading the original vignette; the people who wrote it are much more knowledgeable than I am about this subject, and I also chose to focus on slightly different things so they&rsquo;re not 100% overlapping. At the end of this post you can find links for further reading.</p>
+<h3 id="imports-and-helper-functions---data-generation">Imports and helper functions - data generation</h3>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#f92672">from</span> collections <span style="color:#f92672">import</span> namedtuple
+<span style="color:#f92672">import</span> numpy <span style="color:#f92672">as</span> np
+<span style="color:#f92672">import</span> itertools <span style="color:#f92672">as</span> it
+<span style="color:#f92672">import</span> pandas <span style="color:#f92672">as</span> pd
+<span style="color:#f92672">from</span> scipy.special <span style="color:#f92672">import</span> expit <span style="color:#66d9ef">as</span> inv_logit
+<span style="color:#f92672">from</span> scipy.stats <span style="color:#f92672">import</span> sem
+<span style="color:#f92672">import</span> seaborn <span style="color:#f92672">as</span> sns
+<span style="color:#f92672">import</span> matplotlib.pyplot <span style="color:#f92672">as</span> plt
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>seed(<span style="color:#ae81ff">98</span>)
 
-<h3 id="imports-and-helper-functions-data-generation">Imports and helper functions - data generation</h3>
-
-<pre><code class="language-python">from collections import namedtuple
-import numpy as np
-import itertools as it
-import pandas as pd
-from scipy.special import expit as inv_logit
-from scipy.stats import sem
-import seaborn as sns
-import matplotlib.pyplot as plt
-</code></pre>
-
-<pre><code class="language-python">np.random.seed(98)
-
-sns.set_palette(&quot;muted&quot;)
-params = {
-    'legend.fontsize': 'x-large',
-    'figure.figsize': (9, 6),
-    'axes.labelsize': 'x-large',
-    'axes.titlesize':'x-large',
-    'xtick.labelsize':'x-large',
-    'ytick.labelsize':'x-large'
+sns<span style="color:#f92672">.</span>set_palette(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">muted</span><span style="color:#e6db74">&#34;</span>)
+params <span style="color:#f92672">=</span> {
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">legend.fontsize</span><span style="color:#e6db74">&#39;</span>: <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">x-large</span><span style="color:#e6db74">&#39;</span>,
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">figure.figsize</span><span style="color:#e6db74">&#39;</span>: (<span style="color:#ae81ff">9</span>, <span style="color:#ae81ff">6</span>),
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">axes.labelsize</span><span style="color:#e6db74">&#39;</span>: <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">x-large</span><span style="color:#e6db74">&#39;</span>,
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">axes.titlesize</span><span style="color:#e6db74">&#39;</span>:<span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">x-large</span><span style="color:#e6db74">&#39;</span>,
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">xtick.labelsize</span><span style="color:#e6db74">&#39;</span>:<span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">x-large</span><span style="color:#e6db74">&#39;</span>,
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">ytick.labelsize</span><span style="color:#e6db74">&#39;</span>:<span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">x-large</span><span style="color:#e6db74">&#39;</span>
 }
-plt.rcParams.update(params)
-%config InlineBackend.figure_format = 'retina'
-</code></pre>
-
-<h1 id="the-data">The data</h1>
-
+plt<span style="color:#f92672">.</span>rcParams<span style="color:#f92672">.</span>update(params)
+<span style="color:#f92672">%</span>config InlineBackend<span style="color:#f92672">.</span>figure_format <span style="color:#f92672">=</span> <span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">retina</span><span style="color:#e6db74">&#39;</span>
+</code></pre></div><h1 id="the-data">The data</h1>
 <p>The data we&rsquo;ll work with is simulated data; this has the obvious advantage that we know the ground truth so we&rsquo;ll be able to assess just how well our method generalizes to the population. The data describes the proportion of the population who would choose to adopt a cat over a dog, given the opportunity. Our outcome variable in this example is binary (cat/dog), but MRP is not restricted to such outcomes and can be used for discrete outcomes with more than two values, as well as continuous outcomes.</p>
-
 <p>These are the variables we&rsquo;ll be working with:</p>
-
-<pre><code class="language-python">sex = range(2)
-eth = range(3)
-age = range(7)
-income = range(3)
-state = range(50)
-</code></pre>
-
-<p>They&rsquo;re all categorical; we use zero-based indexing to enumerate them (instead of calling them &lsquo;Male&rsquo;, &lsquo;Female&rsquo; etc) because it&rsquo;ll make all the indexing gymnastics in the actual implementation somewhat simpler.</p>
-
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">sex <span style="color:#f92672">=</span> range(<span style="color:#ae81ff">2</span>)
+eth <span style="color:#f92672">=</span> range(<span style="color:#ae81ff">3</span>)
+age <span style="color:#f92672">=</span> range(<span style="color:#ae81ff">7</span>)
+income <span style="color:#f92672">=</span> range(<span style="color:#ae81ff">3</span>)
+state <span style="color:#f92672">=</span> range(<span style="color:#ae81ff">50</span>)
+</code></pre></div><p>They&rsquo;re all categorical; we use zero-based indexing to enumerate them (instead of calling them &lsquo;Male&rsquo;, &lsquo;Female&rsquo; etc) because it&rsquo;ll make all the indexing gymnastics in the actual implementation somewhat simpler.</p>
 <p><code>poststrat</code> is a dataframe containing all $2\times3\times7\times3\times50=6300$ possible combinations of these variables:</p>
-
-<pre><code class="language-python">poststrat = pd.DataFrame(
-    list(it.product(sex, eth, age, income, state)),
-    columns=[&quot;sex&quot;, &quot;eth&quot;, &quot;age&quot;, &quot;income&quot;, &quot;state&quot;],
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">poststrat <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>DataFrame(
+    list(it<span style="color:#f92672">.</span>product(sex, eth, age, income, state)),
+    columns<span style="color:#f92672">=</span>[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>],
 )
-poststrat.sample(5)
-</code></pre>
-
-<table>
+poststrat<span style="color:#f92672">.</span>sample(<span style="color:#ae81ff">5</span>)
+</code></pre></div><table>
 <thead>
 <tr>
 <th align="right"></th>
@@ -572,7 +549,6 @@ poststrat.sample(5)
 <th align="right">state</th>
 </tr>
 </thead>
-
 <tbody>
 <tr>
 <td align="right">4675</td>
@@ -582,7 +558,6 @@ poststrat.sample(5)
 <td align="right">0</td>
 <td align="right">25</td>
 </tr>
-
 <tr>
 <td align="right">1620</td>
 <td align="right">0</td>
@@ -591,7 +566,6 @@ poststrat.sample(5)
 <td align="right">2</td>
 <td align="right">20</td>
 </tr>
-
 <tr>
 <td align="right">1749</td>
 <td align="right">0</td>
@@ -600,7 +574,6 @@ poststrat.sample(5)
 <td align="right">1</td>
 <td align="right">49</td>
 </tr>
-
 <tr>
 <td align="right">1141</td>
 <td align="right">0</td>
@@ -609,7 +582,6 @@ poststrat.sample(5)
 <td align="right">1</td>
 <td align="right">41</td>
 </tr>
-
 <tr>
 <td align="right">2460</td>
 <td align="right">0</td>
@@ -620,65 +592,52 @@ poststrat.sample(5)
 </tr>
 </tbody>
 </table>
-
-<pre><code class="language-python">poststrat.shape
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">poststrat<span style="color:#f92672">.</span>shape
+</code></pre></div><pre><code>(6300, 5)
 </code></pre>
-
-<pre><code>(6300, 5)
-</code></pre>
-
 <p>Below are the different proportions of the different variables <em>in the population</em>. For example, 20% of the population are in the first age group, 10% are in the second, etc. For each combination of variables we&rsquo;ll compute the number of people that share this specific combination by multiplying the total number of people in the population (assumed to be 250 million) with the different probabilities (this means we&rsquo;re assuming the joint probability distribution factorizes, that is - that the different variables are independent).</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">p_age <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0.2</span>, <span style="color:#ae81ff">0.1</span>, <span style="color:#ae81ff">0.2</span>, <span style="color:#ae81ff">0.2</span>, <span style="color:#ae81ff">0.10</span>, <span style="color:#ae81ff">0.1</span>, <span style="color:#ae81ff">0.1</span>])
+p_sex <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0.52</span>, <span style="color:#ae81ff">0.48</span>])
+p_eth <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0.5</span>, <span style="color:#ae81ff">0.2</span>, <span style="color:#ae81ff">0.3</span>])
+p_income <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0.50</span>, <span style="color:#ae81ff">0.35</span>, <span style="color:#ae81ff">0.15</span>])
+p_state_tmp <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>uniform(low<span style="color:#f92672">=</span><span style="color:#ae81ff">10</span>, high<span style="color:#f92672">=</span><span style="color:#ae81ff">20</span>, size<span style="color:#f92672">=</span><span style="color:#ae81ff">50</span>)
+p_state <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array(p_state_tmp <span style="color:#f92672">/</span> p_state_tmp<span style="color:#f92672">.</span>sum())
 
-<pre><code class="language-python">p_age = np.array([0.2, 0.1, 0.2, 0.2, 0.10, 0.1, 0.1])
-p_sex = np.array([0.52, 0.48])
-p_eth = np.array([0.5, 0.2, 0.3])
-p_income = np.array([0.50, 0.35, 0.15])
-p_state_tmp = np.random.uniform(low=10, high=20, size=50)
-p_state = np.array(p_state_tmp / p_state_tmp.sum())
-
-poststrat[&quot;N&quot;] = (
-    250e6
-    * p_sex[poststrat[&quot;sex&quot;]]
-    * p_eth[poststrat[&quot;eth&quot;]]
-    * p_age[poststrat[&quot;age&quot;]]
-    * p_income[poststrat[&quot;income&quot;]]
-    * p_state[poststrat[&quot;state&quot;]]
+poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>] <span style="color:#f92672">=</span> (
+    <span style="color:#ae81ff">250e6</span>
+    <span style="color:#f92672">*</span> p_sex[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">*</span> p_eth[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">*</span> p_age[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">*</span> p_income[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">*</span> p_state[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>]]
 )
-</code></pre>
+</code></pre></div><p>We also assume that different groups have different probabilities of being included in the sample; in a way, that&rsquo;s the entire point (if all groups had the same probability of being included in the sample then the sample was representative of the population). There&rsquo;s a baseline probability of being in the sample, but it cancels out in the weighted average; what determines who is in our sample is <code>p_response_weighted</code>, which is <code>p_response</code> weighted by the number of people in each group:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">p_response_baseline <span style="color:#f92672">=</span> <span style="color:#ae81ff">0.01</span>
+p_response_sex <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">0.8</span>]) <span style="color:#f92672">/</span> <span style="color:#ae81ff">2.8</span>
+p_response_eth <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">1.2</span>, <span style="color:#ae81ff">2.5</span>]) <span style="color:#f92672">/</span> <span style="color:#ae81ff">4.7</span> 
+p_response_age <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">0.4</span>, <span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">1.5</span>, <span style="color:#ae81ff">3</span>, <span style="color:#ae81ff">5</span>, <span style="color:#ae81ff">7</span>]) <span style="color:#f92672">/</span> <span style="color:#ae81ff">18.9</span>
+p_response_inc <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">0.9</span>, <span style="color:#ae81ff">0.8</span>]) <span style="color:#f92672">/</span> <span style="color:#ae81ff">2.7</span>
+p_response_state <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>beta(a<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>, b<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>, size<span style="color:#f92672">=</span><span style="color:#ae81ff">50</span>)
+p_response_state <span style="color:#f92672">=</span> p_response_state <span style="color:#f92672">/</span> p_response_state<span style="color:#f92672">.</span>sum()
 
-<p>We also assume that different groups have different probabilities of being included in the sample; in a way, that&rsquo;s the entire point (if all groups had the same probability of being included in the sample then the sample was representative of the population). There&rsquo;s a baseline probability of being in the sample, but it cancels out in the weighted average; what determines who is in our sample is <code>p_response_weighted</code>, which is <code>p_response</code> weighted by the number of people in each group:</p>
-
-<pre><code class="language-python">p_response_baseline = 0.01
-p_response_sex = np.array([2, 0.8]) / 2.8
-p_response_eth = np.array([1, 1.2, 2.5]) / 4.7 
-p_response_age = np.array([1, 0.4, 1, 1.5, 3, 5, 7]) / 18.9
-p_response_inc = np.array([1, 0.9, 0.8]) / 2.7
-p_response_state = np.random.beta(a=1, b=1, size=50)
-p_response_state = p_response_state / p_response_state.sum()
-
-p_response = (
+p_response <span style="color:#f92672">=</span> (
     p_response_baseline
-    * p_response_sex[poststrat[&quot;sex&quot;]]
-    * p_response_eth[poststrat[&quot;eth&quot;]]
-    * p_response_age[poststrat[&quot;age&quot;]]
-    * p_response_inc[poststrat[&quot;income&quot;]]
-    * p_response_state[poststrat[&quot;state&quot;]]
+    <span style="color:#f92672">*</span> p_response_sex[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">*</span> p_response_eth[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">*</span> p_response_age[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">*</span> p_response_inc[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">*</span> p_response_state[poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>]]
 )
 
-p_response_weighted = poststrat[&quot;N&quot;] * p_response / (poststrat[&quot;N&quot;] * p_response).sum()
-</code></pre>
-
-<p>We now sample 1200 individuals from the entire population. This means we&rsquo;re actually sampling rows from our <code>poststrat</code> dataframe with different probabilities given by <code>p_response_weighted</code>:</p>
-
-<pre><code class="language-python">n = 1200
-people = np.random.choice(
-    np.arange(poststrat.shape[0]), size=n, replace=True, p=p_response_weighted
+p_response_weighted <span style="color:#f92672">=</span> poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>] <span style="color:#f92672">*</span> p_response <span style="color:#f92672">/</span> (poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>] <span style="color:#f92672">*</span> p_response)<span style="color:#f92672">.</span>sum()
+</code></pre></div><p>We now sample 1200 individuals from the entire population. This means we&rsquo;re actually sampling rows from our <code>poststrat</code> dataframe with different probabilities given by <code>p_response_weighted</code>:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">n <span style="color:#f92672">=</span> <span style="color:#ae81ff">1200</span>
+people <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>choice(
+    np<span style="color:#f92672">.</span>arange(poststrat<span style="color:#f92672">.</span>shape[<span style="color:#ae81ff">0</span>]), size<span style="color:#f92672">=</span>n, replace<span style="color:#f92672">=</span>True, p<span style="color:#f92672">=</span>p_response_weighted
 )
-sample = poststrat.drop(&quot;N&quot;, axis=1).iloc[people].reset_index()
-sample.sample(5)
-</code></pre>
-
-<table>
+sample <span style="color:#f92672">=</span> poststrat<span style="color:#f92672">.</span>drop(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>, axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)<span style="color:#f92672">.</span>iloc[people]<span style="color:#f92672">.</span>reset_index()
+sample<span style="color:#f92672">.</span>sample(<span style="color:#ae81ff">5</span>)
+</code></pre></div><table>
 <thead>
 <tr>
 <th align="right"></th>
@@ -690,7 +649,6 @@ sample.sample(5)
 <th align="right">state</th>
 </tr>
 </thead>
-
 <tbody>
 <tr>
 <td align="right">520</td>
@@ -701,7 +659,6 @@ sample.sample(5)
 <td align="right">0</td>
 <td align="right">41</td>
 </tr>
-
 <tr>
 <td align="right">287</td>
 <td align="right">2626</td>
@@ -711,7 +668,6 @@ sample.sample(5)
 <td align="right">1</td>
 <td align="right">26</td>
 </tr>
-
 <tr>
 <td align="right">870</td>
 <td align="right">2591</td>
@@ -721,7 +677,6 @@ sample.sample(5)
 <td align="right">0</td>
 <td align="right">41</td>
 </tr>
-
 <tr>
 <td align="right">69</td>
 <td align="right">1517</td>
@@ -731,7 +686,6 @@ sample.sample(5)
 <td align="right">0</td>
 <td align="right">17</td>
 </tr>
-
 <tr>
 <td align="right">169</td>
 <td align="right">4104</td>
@@ -743,35 +697,29 @@ sample.sample(5)
 </tr>
 </tbody>
 </table>
-
 <p>Now we&rsquo;re getting to the thing we&rsquo;ll actually measure in the sample (and then try to generalize to the population) - cat preference. Below are the coefficients of a regression model that determines the log-odds of cat preference, $\log\frac{P(\text{prefers cats})}{P(\text{prefers dogs})}$ for each group in the population. We&rsquo;ll use these coefficients to compute the actual probability of cats preference for each group:</p>
-
-<pre><code class="language-python">coef_sex = np.array([0, -0.3])
-coef_eth = np.array([0, 0.6, 0.9])
-coef_age = np.array([0, -0.2, -0.3, 0.4, 0.5, 0.7, 0.8, 0.9])
-coef_income = np.array([0, -0.2, 0.6])
-coef_state = np.insert(np.random.normal(0, 1, 49).round(1), 0, 0)
-coef_age_sex = np.vstack(
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">coef_sex <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.3</span>])
+coef_eth <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">0.6</span>, <span style="color:#ae81ff">0.9</span>])
+coef_age <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.2</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.3</span>, <span style="color:#ae81ff">0.4</span>, <span style="color:#ae81ff">0.5</span>, <span style="color:#ae81ff">0.7</span>, <span style="color:#ae81ff">0.8</span>, <span style="color:#ae81ff">0.9</span>])
+coef_income <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.2</span>, <span style="color:#ae81ff">0.6</span>])
+coef_state <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>insert(np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>normal(<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">49</span>)<span style="color:#f92672">.</span>round(<span style="color:#ae81ff">1</span>), <span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">0</span>)
+coef_age_sex <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>vstack(
     [
-        np.array([0, 0.1, 0.23, 0.3, 0.43, 0.5, 0.6]),
-        np.array([0, -0.1, -0.23, -0.5, -0.43, -0.5, -0.6]),
+        np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">0.1</span>, <span style="color:#ae81ff">0.23</span>, <span style="color:#ae81ff">0.3</span>, <span style="color:#ae81ff">0.43</span>, <span style="color:#ae81ff">0.5</span>, <span style="color:#ae81ff">0.6</span>]),
+        np<span style="color:#f92672">.</span>array([<span style="color:#ae81ff">0</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.23</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.5</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.43</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.5</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.6</span>]),
     ]
-).T
-</code></pre>
-
-<pre><code class="language-python">true_pop = poststrat.drop(&quot;N&quot;, axis=1)
-true_pop[&quot;cat_pref&quot;] = inv_logit(
-    coef_sex[true_pop[&quot;sex&quot;]]
-    + coef_eth[true_pop[&quot;eth&quot;]]
-    + coef_age[true_pop[&quot;age&quot;]]
-    + coef_income[true_pop[&quot;income&quot;]]
-    + coef_state[true_pop[&quot;state&quot;]]
-    + coef_age_sex[true_pop[&quot;age&quot;], true_pop[&quot;sex&quot;]]
+)<span style="color:#f92672">.</span>T
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">true_pop <span style="color:#f92672">=</span> poststrat<span style="color:#f92672">.</span>drop(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>, axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)
+true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>] <span style="color:#f92672">=</span> inv_logit(
+    coef_sex[true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">+</span> coef_eth[true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">+</span> coef_age[true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">+</span> coef_income[true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">+</span> coef_state[true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>]]
+    <span style="color:#f92672">+</span> coef_age_sex[true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>], true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>]]
 )
-true_pop.sample(5)
-</code></pre>
-
-<table>
+true_pop<span style="color:#f92672">.</span>sample(<span style="color:#ae81ff">5</span>)
+</code></pre></div><table>
 <thead>
 <tr>
 <th align="right"></th>
@@ -783,7 +731,6 @@ true_pop.sample(5)
 <th align="right">cat_pref</th>
 </tr>
 </thead>
-
 <tbody>
 <tr>
 <td align="right">6124</td>
@@ -794,7 +741,6 @@ true_pop.sample(5)
 <td align="right">24</td>
 <td align="right">0.71095</td>
 </tr>
-
 <tr>
 <td align="right">177</td>
 <td align="right">0</td>
@@ -804,7 +750,6 @@ true_pop.sample(5)
 <td align="right">27</td>
 <td align="right">0.549834</td>
 </tr>
-
 <tr>
 <td align="right">5755</td>
 <td align="right">1</td>
@@ -814,7 +759,6 @@ true_pop.sample(5)
 <td align="right">5</td>
 <td align="right">0.331812</td>
 </tr>
-
 <tr>
 <td align="right">2102</td>
 <td align="right">0</td>
@@ -824,7 +768,6 @@ true_pop.sample(5)
 <td align="right">2</td>
 <td align="right">0.802184</td>
 </tr>
-
 <tr>
 <td align="right">3931</td>
 <td align="right">1</td>
@@ -836,14 +779,10 @@ true_pop.sample(5)
 </tr>
 </tbody>
 </table>
-
 <p>We now use the computed probabilities to determine, for each individual in our sample, whether she&rsquo;s a cats person or a dogs person. Note that this is still the fake data generation part; we&rsquo;re not modelling anything yet.</p>
-
-<pre><code class="language-python">sample[&quot;cat_pref&quot;] = np.random.binomial(n=1, p=true_pop[&quot;cat_pref&quot;][people], size=n)
-sample.head()
-</code></pre>
-
-<table>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>] <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>binomial(n<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>, p<span style="color:#f92672">=</span>true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>][people], size<span style="color:#f92672">=</span>n)
+sample<span style="color:#f92672">.</span>head()
+</code></pre></div><table>
 <thead>
 <tr>
 <th align="right"></th>
@@ -856,7 +795,6 @@ sample.head()
 <th align="right">cat_pref</th>
 </tr>
 </thead>
-
 <tbody>
 <tr>
 <td align="right">0</td>
@@ -868,7 +806,6 @@ sample.head()
 <td align="right">21</td>
 <td align="right">1</td>
 </tr>
-
 <tr>
 <td align="right">1</td>
 <td align="right">2141</td>
@@ -879,7 +816,6 @@ sample.head()
 <td align="right">41</td>
 <td align="right">1</td>
 </tr>
-
 <tr>
 <td align="right">2</td>
 <td align="right">906</td>
@@ -890,7 +826,6 @@ sample.head()
 <td align="right">6</td>
 <td align="right">1</td>
 </tr>
-
 <tr>
 <td align="right">3</td>
 <td align="right">3062</td>
@@ -901,7 +836,6 @@ sample.head()
 <td align="right">12</td>
 <td align="right">1</td>
 </tr>
-
 <tr>
 <td align="right">4</td>
 <td align="right">6043</td>
@@ -914,100 +848,76 @@ sample.head()
 </tr>
 </tbody>
 </table>
-
 <p>Just to get a glimpse of the problem Mr. P is trying to solve, the sample mean is:</p>
-
-<pre><code class="language-python">sample[&quot;cat_pref&quot;].mean()
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>mean()
+</code></pre></div><pre><code>0.7083333333333334
 </code></pre>
-
-<pre><code>0.7083333333333334
-</code></pre>
-
 <p>While the true mean in the population (which is a weighted sum of the per-group probabilities and the group sizes) is:</p>
-
-<pre><code class="language-python">true_pop_pref = sum(true_pop[&quot;cat_pref&quot;] * poststrat[&quot;N&quot;]) / sum(poststrat[&quot;N&quot;])
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">true_pop_pref <span style="color:#f92672">=</span> sum(true_pop[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>] <span style="color:#f92672">*</span> poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>]) <span style="color:#f92672">/</span> sum(poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>])
 true_pop_pref
+</code></pre></div><pre><code>0.5941253009200917
 </code></pre>
-
-<pre><code>0.5941253009200917
-</code></pre>
-
 <p>So our sample overestimates cats-lovin&rsquo; in the population by 18% - people who like cats also like taking surveys.</p>
-
 <h2 id="visualizations">Visualizations</h2>
-
 <p>To get a better understanding of the problem (unrepresentativeness of the sample), we&rsquo;ll plot some summary statistics and see how they differ:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">f, ax <span style="color:#f92672">=</span> plt<span style="color:#f92672">.</span>subplots(<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">4</span>, figsize<span style="color:#f92672">=</span>(<span style="color:#ae81ff">12</span>, <span style="color:#ae81ff">3</span>))
 
-<pre><code class="language-python">f, ax = plt.subplots(1, 4, figsize=(12, 3))
-
-pd.DataFrame(
-    dict(pop=pd.Series(p_age), sample=(sample.age.value_counts().sort_index() / n))
-).plot(kind=&quot;bar&quot;, ax=ax[0], title=&quot;age&quot;)
-pd.DataFrame(
-    dict(pop=pd.Series(p_eth), sample=(sample.eth.value_counts().sort_index() / n))
-).plot(kind=&quot;bar&quot;, ax=ax[1], legend=False, title=&quot;ethnicity&quot;)
-pd.DataFrame(
+pd<span style="color:#f92672">.</span>DataFrame(
+    dict(pop<span style="color:#f92672">=</span>pd<span style="color:#f92672">.</span>Series(p_age), sample<span style="color:#f92672">=</span>(sample<span style="color:#f92672">.</span>age<span style="color:#f92672">.</span>value_counts()<span style="color:#f92672">.</span>sort_index() <span style="color:#f92672">/</span> n))
+)<span style="color:#f92672">.</span>plot(kind<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">bar</span><span style="color:#e6db74">&#34;</span>, ax<span style="color:#f92672">=</span>ax[<span style="color:#ae81ff">0</span>], title<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>)
+pd<span style="color:#f92672">.</span>DataFrame(
+    dict(pop<span style="color:#f92672">=</span>pd<span style="color:#f92672">.</span>Series(p_eth), sample<span style="color:#f92672">=</span>(sample<span style="color:#f92672">.</span>eth<span style="color:#f92672">.</span>value_counts()<span style="color:#f92672">.</span>sort_index() <span style="color:#f92672">/</span> n))
+)<span style="color:#f92672">.</span>plot(kind<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">bar</span><span style="color:#e6db74">&#34;</span>, ax<span style="color:#f92672">=</span>ax[<span style="color:#ae81ff">1</span>], legend<span style="color:#f92672">=</span>False, title<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">ethnicity</span><span style="color:#e6db74">&#34;</span>)
+pd<span style="color:#f92672">.</span>DataFrame(
     dict(
-        pop=pd.Series(p_income), sample=(sample.income.value_counts().sort_index() / n)
+        pop<span style="color:#f92672">=</span>pd<span style="color:#f92672">.</span>Series(p_income), sample<span style="color:#f92672">=</span>(sample<span style="color:#f92672">.</span>income<span style="color:#f92672">.</span>value_counts()<span style="color:#f92672">.</span>sort_index() <span style="color:#f92672">/</span> n)
     )
-).plot(kind=&quot;bar&quot;, ax=ax[2], legend=False, title=&quot;income&quot;)
-pd.DataFrame(
-    dict(pop=pd.Series(p_sex), sample=(sample.sex.value_counts().sort_index() / n))
-).plot(kind=&quot;bar&quot;, ax=ax[3], legend=False, title=&quot;sex&quot;)
-plt.tight_layout()
-</code></pre>
-
-<p><img src="output_33_0.png" alt="png" /></p>
-
+)<span style="color:#f92672">.</span>plot(kind<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">bar</span><span style="color:#e6db74">&#34;</span>, ax<span style="color:#f92672">=</span>ax[<span style="color:#ae81ff">2</span>], legend<span style="color:#f92672">=</span>False, title<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>)
+pd<span style="color:#f92672">.</span>DataFrame(
+    dict(pop<span style="color:#f92672">=</span>pd<span style="color:#f92672">.</span>Series(p_sex), sample<span style="color:#f92672">=</span>(sample<span style="color:#f92672">.</span>sex<span style="color:#f92672">.</span>value_counts()<span style="color:#f92672">.</span>sort_index() <span style="color:#f92672">/</span> n))
+)<span style="color:#f92672">.</span>plot(kind<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">bar</span><span style="color:#e6db74">&#34;</span>, ax<span style="color:#f92672">=</span>ax[<span style="color:#ae81ff">3</span>], legend<span style="color:#f92672">=</span>False, title<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>tight_layout()
+</code></pre></div><p><img src="output_33_0.png" alt="png"></p>
 <p>At least by eyeballing the charts, the differences seem substantial; for example, if there&rsquo;s a big difference in cats preference between males and females, we expect to see a substantial difference between the cats preference in the sample and in the population.</p>
-
 <p>We can also plot how cats preference changes between different groups <em>within</em> our sample - for example, is there a difference in cats preference between different age groups? (yes there is)</p>
-
-<pre><code class="language-python">f, axes = plt.subplots(1, 4, figsize=(12, 3), sharey=True)
-for key, ax in zip([&quot;age&quot;, &quot;eth&quot;, &quot;income&quot;, &quot;sex&quot;], axes):
-    sample.groupby(key)[&quot;cat_pref&quot;].agg(dict(mean=np.mean, std=sem)).reset_index().plot(
-        kind=&quot;bar&quot;, x=key, y=&quot;mean&quot;, yerr=&quot;std&quot;, ax=ax, legend=False
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">f, axes <span style="color:#f92672">=</span> plt<span style="color:#f92672">.</span>subplots(<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">4</span>, figsize<span style="color:#f92672">=</span>(<span style="color:#ae81ff">12</span>, <span style="color:#ae81ff">3</span>), sharey<span style="color:#f92672">=</span>True)
+<span style="color:#66d9ef">for</span> key, ax <span style="color:#f92672">in</span> zip([<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>], axes):
+    sample<span style="color:#f92672">.</span>groupby(key)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>agg(dict(mean<span style="color:#f92672">=</span>np<span style="color:#f92672">.</span>mean, std<span style="color:#f92672">=</span>sem))<span style="color:#f92672">.</span>reset_index()<span style="color:#f92672">.</span>plot(
+        kind<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">bar</span><span style="color:#e6db74">&#34;</span>, x<span style="color:#f92672">=</span>key, y<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">mean</span><span style="color:#e6db74">&#34;</span>, yerr<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">std</span><span style="color:#e6db74">&#34;</span>, ax<span style="color:#f92672">=</span>ax, legend<span style="color:#f92672">=</span>False
     )
-    plt.ylim(0, 1)
-plt.tight_layout()
-</code></pre>
-
-<p><img src="output_36_1.png" alt="png" /></p>
-
+    plt<span style="color:#f92672">.</span>ylim(<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">1</span>)
+plt<span style="color:#f92672">.</span>tight_layout()
+</code></pre></div><p><img src="output_36_1.png" alt="png"></p>
 <h1 id="the-model">The model</h1>
-
 <p>We now turn to the MR part of MRP - the multilevel regression part. More specifically, we&rsquo;ll build a Bayesian multilevel logistic regression model of cats preference. Even more specifically, we&rsquo;ll build what&rsquo;s called a &ldquo;mixed
 effects&rdquo; model. Mixed effects models are one of those places that, at least for me, the statisticians terminology is <em>extremely</em> confusing; it also seems to be inconsistent between different academic fields.  I usually find it easier to look at the actual model specification to understand what&rsquo;s going on:</p>
-
 <p>For each group $j\in\left[1,&hellip;,6300\right]$ we model the probability of cats preference as</p>
-
 <p>$$
 \begin{align}
 \theta_j &amp; = logit^{-1}(
 \alpha +
-X_{j}\beta
-+ \alpha_{\rm state[j]}^{\rm state}
-+ \alpha_{\rm age[j]}^{\rm age}
-+ \alpha_{\rm eth[j]}^{\rm eth}
-+ \alpha_{\rm inc[j]}^{\rm inc}
-) \\<br />
-\alpha_{\rm state[j]}^{\rm state} &amp; \sim N(0,\sigma^{\rm state}) \\<br />
-\alpha_{\rm age[j]}^{\rm age} &amp; \sim N(0,\sigma^{\rm age})\\<br />
-\alpha_{\rm eth[j]}^{\rm eth} &amp; \sim N(0,\sigma^{\rm eth})\\<br />
-\alpha_{\rm inc[j]}^{\rm inc} &amp;\sim N(0,\sigma^{\rm inc}) \\<br />
-\sigma^{\rm state} &amp; \sim {\rm HalfNormal}(1) \\<br />
-\sigma^{\rm age} &amp; \sim {\rm HalfNormal}(1) \\<br />
-\sigma^{\rm eth} &amp; \sim {\rm HalfNormal}(1) \\<br />
-\sigma^{\rm income} &amp; \sim {\rm HalfNormal}(1) \\<br />
-\beta &amp; \sim N(0,2.5) \\<br />
-\alpha &amp; \sim N(0,10) \\<br />
+X_{j}\beta</p>
+<ul>
+<li>\alpha_{\rm state[j]}^{\rm state}</li>
+<li>\alpha_{\rm age[j]}^{\rm age}</li>
+<li>\alpha_{\rm eth[j]}^{\rm eth}</li>
+<li>\alpha_{\rm inc[j]}^{\rm inc}
+) \\\<br>
+\alpha_{\rm state[j]}^{\rm state} &amp; \sim N(0,\sigma^{\rm state}) \\\<br>
+\alpha_{\rm age[j]}^{\rm age} &amp; \sim N(0,\sigma^{\rm age})\\\<br>
+\alpha_{\rm eth[j]}^{\rm eth} &amp; \sim N(0,\sigma^{\rm eth})\\\<br>
+\alpha_{\rm inc[j]}^{\rm inc} &amp;\sim N(0,\sigma^{\rm inc}) \\\<br>
+\sigma^{\rm state} &amp; \sim {\rm HalfNormal}(1) \\\<br>
+\sigma^{\rm age} &amp; \sim {\rm HalfNormal}(1) \\\<br>
+\sigma^{\rm eth} &amp; \sim {\rm HalfNormal}(1) \\\<br>
+\sigma^{\rm income} &amp; \sim {\rm HalfNormal}(1) \\\<br>
+\beta &amp; \sim N(0,2.5) \\\<br>
+\alpha &amp; \sim N(0,10) \\\<br>
 \end{align}
-$$</p>
-
-<p>We&rsquo;ve seen expressions like $\alpha_{\rm state[j]}^{\rm state}$ when we&rsquo;ve implemented <a href="https://adamhaber.github.io/2019/07/08/A-Tutorial-on-Varying-Intercepts-Models-with-TensorFlow-Probability.html" target="_blank">varying intercepts models</a>. What makes this a &ldquo;mixed effects&rdquo; models is that $\beta$ is the same $\beta$ for all groups, while the different $\alpha^*$-s vary between groups. I&rsquo;m sure there are subtleties and nuances that this doesn&rsquo;t capture, but for me this is a simple-to-read, simple-to-implement explanation of mixed effects models.</p>
-
+$$</li>
+</ul>
+<p>We&rsquo;ve seen expressions like $\alpha_{\rm state[j]}^{\rm state}$ when we&rsquo;ve implemented <a href="https://adamhaber.github.io/2019/07/08/A-Tutorial-on-Varying-Intercepts-Models-with-TensorFlow-Probability.html">varying intercepts models</a>. What makes this a &ldquo;mixed effects&rdquo; models is that $\beta$ is the same $\beta$ for all groups, while the different $\alpha^*$-s vary between groups. I&rsquo;m sure there are subtleties and nuances that this doesn&rsquo;t capture, but for me this is a simple-to-read, simple-to-implement explanation of mixed effects models.</p>
 <p>As for the model itself:</p>
-
 <ul>
 <li>$X$ is a (binary) design matrix that holds indicators for sex, age and sex-age interactions - we&rsquo;ll construct it in a second.</li>
 <li>$\alpha$ is an intercept term.</li>
@@ -1015,23 +925,18 @@ $$</p>
 <li>The different $\alpha^*$-s are per-group varying intercepts.</li>
 <li>The different $\sigma^*$-s are hyperpriors for variation between groups.</li>
 </ul>
-
 <p>The priors on $\alpha,\beta$ are rstanarm&rsquo;s default priors; I couldn&rsquo;t find rstanarm&rsquo;s default prior on the $\sigma^*$ so I chose to use a halfnormal(1) prior.</p>
-
 <p>Our design matrix $X$ will represent a one-hot-encoded representation of the sampled individuals sex, age, and sex-age interaction term. Here&rsquo;s how it looks like:</p>
-
-<pre><code class="language-python">factors = pd.get_dummies(sample[[&quot;sex&quot;, &quot;age&quot;]].astype(&quot;category&quot;)).drop(
-    [&quot;sex_0&quot;, &quot;age_0&quot;], axis=1
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">factors <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>get_dummies(sample[[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>]]<span style="color:#f92672">.</span>astype(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">category</span><span style="color:#e6db74">&#34;</span>))<span style="color:#f92672">.</span>drop(
+    [<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_0</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age_0</span><span style="color:#e6db74">&#34;</span>], axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>
 )
-interactions = pd.DataFrame(
-    factors.drop(&quot;sex_1&quot;, axis=1).values * factors[&quot;sex_1&quot;].values[:, None],
-    columns=[f&quot;sex_1*age_{i+1}&quot; for i in range(6)],
+interactions <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>DataFrame(
+    factors<span style="color:#f92672">.</span>drop(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1</span><span style="color:#e6db74">&#34;</span>, axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)<span style="color:#f92672">.</span>values <span style="color:#f92672">*</span> factors[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>values[:, None],
+    columns<span style="color:#f92672">=</span>[f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1*age_{i+1}</span><span style="color:#e6db74">&#34;</span> <span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(<span style="color:#ae81ff">6</span>)],
 )
-features = pd.concat([factors, interactions], axis=1)
-features.head()
-</code></pre>
-
-<table>
+features <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>concat([factors, interactions], axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)
+features<span style="color:#f92672">.</span>head()
+</code></pre></div><table>
 <thead>
 <tr>
 <th align="right"></th>
@@ -1050,7 +955,6 @@ features.head()
 <th align="right">sex_1*age_6</th>
 </tr>
 </thead>
-
 <tbody>
 <tr>
 <td align="right">0</td>
@@ -1068,7 +972,6 @@ features.head()
 <td align="right">0</td>
 <td align="right">0</td>
 </tr>
-
 <tr>
 <td align="right">1</td>
 <td align="right">0</td>
@@ -1085,7 +988,6 @@ features.head()
 <td align="right">0</td>
 <td align="right">0</td>
 </tr>
-
 <tr>
 <td align="right">2</td>
 <td align="right">0</td>
@@ -1102,7 +1004,6 @@ features.head()
 <td align="right">0</td>
 <td align="right">0</td>
 </tr>
-
 <tr>
 <td align="right">3</td>
 <td align="right">0</td>
@@ -1119,7 +1020,6 @@ features.head()
 <td align="right">0</td>
 <td align="right">0</td>
 </tr>
-
 <tr>
 <td align="right">4</td>
 <td align="right">1</td>
@@ -1138,162 +1038,132 @@ features.head()
 </tr>
 </tbody>
 </table>
-
-<pre><code class="language-python">features.shape
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">features<span style="color:#f92672">.</span>shape
+</code></pre></div><pre><code>(1200, 13)
 </code></pre>
-
-<pre><code>(1200, 13)
-</code></pre>
-
 <p>To make TF shape issues simpler, we convert it to a numpy array and transpose it:</p>
-
-<pre><code class="language-python">features = features.values.T
-</code></pre>
-
-<h3 id="imports-and-helper-functions-inference">Imports and helper functions - inference</h3>
-
-<pre><code class="language-python">import tensorflow as tf
-import tensorflow_probability as tfp
-from tensorflow_probability import distributions as tfd
-from tensorflow_probability import bijectors as tfb
-import arviz as az
-</code></pre>
-
-<pre><code class="language-python">n_chains = 4
-dtype = tf.float32
-</code></pre>
-
-<pre><code class="language-python">def step_size_setter_fn(pkr, new_step_size):
-    return pkr._replace(
-        inner_results=pkr.inner_results._replace(step_size=new_step_size)
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">features <span style="color:#f92672">=</span> features<span style="color:#f92672">.</span>values<span style="color:#f92672">.</span>T
+</code></pre></div><h3 id="imports-and-helper-functions---inference">Imports and helper functions - inference</h3>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#f92672">import</span> tensorflow <span style="color:#f92672">as</span> tf
+<span style="color:#f92672">import</span> tensorflow_probability <span style="color:#f92672">as</span> tfp
+<span style="color:#f92672">from</span> tensorflow_probability <span style="color:#f92672">import</span> distributions <span style="color:#66d9ef">as</span> tfd
+<span style="color:#f92672">from</span> tensorflow_probability <span style="color:#f92672">import</span> bijectors <span style="color:#66d9ef">as</span> tfb
+<span style="color:#f92672">import</span> arviz <span style="color:#f92672">as</span> az
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">n_chains <span style="color:#f92672">=</span> <span style="color:#ae81ff">4</span>
+dtype <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>float32
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">step_size_setter_fn</span>(pkr, new_step_size):
+    <span style="color:#66d9ef">return</span> pkr<span style="color:#f92672">.</span>_replace(
+        inner_results<span style="color:#f92672">=</span>pkr<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>_replace(step_size<span style="color:#f92672">=</span>new_step_size)
     )
-</code></pre>
-
-<pre><code class="language-python">factors = pd.get_dummies(sample[[&quot;sex&quot;, &quot;age&quot;]].astype(&quot;category&quot;)).drop(
-    [&quot;sex_0&quot;, &quot;age_0&quot;], axis=1
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">factors <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>get_dummies(sample[[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>]]<span style="color:#f92672">.</span>astype(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">category</span><span style="color:#e6db74">&#34;</span>))<span style="color:#f92672">.</span>drop(
+    [<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_0</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age_0</span><span style="color:#e6db74">&#34;</span>], axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>
 )
-interactions = pd.DataFrame(
-    factors.drop(&quot;sex_1&quot;, axis=1).values * factors[&quot;sex_1&quot;].values[:, None],
-    columns=[f&quot;sex_1*age_{i}&quot; for i in range(6)],
+interactions <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>DataFrame(
+    factors<span style="color:#f92672">.</span>drop(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1</span><span style="color:#e6db74">&#34;</span>, axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)<span style="color:#f92672">.</span>values <span style="color:#f92672">*</span> factors[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>values[:, None],
+    columns<span style="color:#f92672">=</span>[f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1*age_{i}</span><span style="color:#e6db74">&#34;</span> <span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(<span style="color:#ae81ff">6</span>)],
 )
-features = pd.concat([factors, interactions], axis=1).values.T
-</code></pre>
+features <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>concat([factors, interactions], axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)<span style="color:#f92672">.</span>values<span style="color:#f92672">.</span>T
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">trace_fn</span>(current_samp, pkr):
 
-<pre><code class="language-python">def trace_fn(current_samp, pkr):
-
-    return (
-        pkr.inner_results.inner_results.target_log_prob,
-        pkr.inner_results.inner_results.leapfrogs_taken,
-        pkr.inner_results.inner_results.has_divergence,
-        pkr.inner_results.inner_results.energy,
-        pkr.inner_results.inner_results.log_accept_ratio,
+    <span style="color:#66d9ef">return</span> (
+        pkr<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>target_log_prob,
+        pkr<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>leapfrogs_taken,
+        pkr<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>has_divergence,
+        pkr<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>energy,
+        pkr<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>log_accept_ratio,
     )
-</code></pre>
-
-<pre><code class="language-python">@tf.function(experimental_compile=True)
-def run_nuts(target_log_prob_fn, initial_states, bijectors_list):
-    step_sizes = [1e-2 * tf.ones_like(i) for i in initial_states]
-    kernel = tfp.mcmc.TransformedTransitionKernel(
-        tfp.mcmc.nuts.NoUTurnSampler(target_log_prob_fn, step_size=step_sizes),
-        bijector=bijectors_list,
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#a6e22e">@tf.function</span>(experimental_compile<span style="color:#f92672">=</span>True)
+<span style="color:#66d9ef">def</span> <span style="color:#a6e22e">run_nuts</span>(target_log_prob_fn, initial_states, bijectors_list):
+    step_sizes <span style="color:#f92672">=</span> [<span style="color:#ae81ff">1e-2</span> <span style="color:#f92672">*</span> tf<span style="color:#f92672">.</span>ones_like(i) <span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> initial_states]
+    kernel <span style="color:#f92672">=</span> tfp<span style="color:#f92672">.</span>mcmc<span style="color:#f92672">.</span>TransformedTransitionKernel(
+        tfp<span style="color:#f92672">.</span>mcmc<span style="color:#f92672">.</span>nuts<span style="color:#f92672">.</span>NoUTurnSampler(target_log_prob_fn, step_size<span style="color:#f92672">=</span>step_sizes),
+        bijector<span style="color:#f92672">=</span>bijectors_list,
     )
 
-    kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
+    kernel <span style="color:#f92672">=</span> tfp<span style="color:#f92672">.</span>mcmc<span style="color:#f92672">.</span>DualAveragingStepSizeAdaptation(
         kernel,
-        target_accept_prob=tf.cast(0.8, dtype=dtype),
-        num_adaptation_steps=800,
-        step_size_setter_fn=step_size_setter_fn,
-        step_size_getter_fn=lambda pkr: pkr.inner_results.step_size,
-        log_accept_prob_getter_fn=lambda pkr: pkr.inner_results.log_accept_ratio,
+        target_accept_prob<span style="color:#f92672">=</span>tf<span style="color:#f92672">.</span>cast(<span style="color:#ae81ff">0.8</span>, dtype<span style="color:#f92672">=</span>dtype),
+        num_adaptation_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">800</span>,
+        step_size_setter_fn<span style="color:#f92672">=</span>step_size_setter_fn,
+        step_size_getter_fn<span style="color:#f92672">=</span><span style="color:#66d9ef">lambda</span> pkr: pkr<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>step_size,
+        log_accept_prob_getter_fn<span style="color:#f92672">=</span><span style="color:#66d9ef">lambda</span> pkr: pkr<span style="color:#f92672">.</span>inner_results<span style="color:#f92672">.</span>log_accept_ratio,
     )
 
-    # Sampling from the chain.
-    mcmc_trace, pkr = tfp.mcmc.sample_chain(
-        num_results=1000,
-        num_burnin_steps=1000,
-        current_state=[
-            bijector.forward(state)
-            for bijector, state in zip(bijectors_list, initial_states)
+    <span style="color:#75715e"># Sampling from the chain.</span>
+    mcmc_trace, pkr <span style="color:#f92672">=</span> tfp<span style="color:#f92672">.</span>mcmc<span style="color:#f92672">.</span>sample_chain(
+        num_results<span style="color:#f92672">=</span><span style="color:#ae81ff">1000</span>,
+        num_burnin_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">1000</span>,
+        current_state<span style="color:#f92672">=</span>[
+            bijector<span style="color:#f92672">.</span>forward(state)
+            <span style="color:#66d9ef">for</span> bijector, state <span style="color:#f92672">in</span> zip(bijectors_list, initial_states)
         ],
-        kernel=kernel,
-        trace_fn=trace_fn,
+        kernel<span style="color:#f92672">=</span>kernel,
+        trace_fn<span style="color:#f92672">=</span>trace_fn,
     )
 
-    return mcmc_trace, pkr
-</code></pre>
-
-<pre><code class="language-python"># using pymc3 naming conventions, with log_likelihood instead of lp so that ArviZ can compute loo and waic
-sample_stats_name = [
-    &quot;log_likelihood&quot;,
-    &quot;tree_size&quot;,
-    &quot;diverging&quot;,
-    &quot;energy&quot;,
-    &quot;mean_tree_accept&quot;,
+    <span style="color:#66d9ef">return</span> mcmc_trace, pkr
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#75715e"># using pymc3 naming conventions, with log_likelihood instead of lp so that ArviZ can compute loo and waic</span>
+sample_stats_name <span style="color:#f92672">=</span> [
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">log_likelihood</span><span style="color:#e6db74">&#34;</span>,
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">tree_size</span><span style="color:#e6db74">&#34;</span>,
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">diverging</span><span style="color:#e6db74">&#34;</span>,
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">energy</span><span style="color:#e6db74">&#34;</span>,
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">mean_tree_accept</span><span style="color:#e6db74">&#34;</span>,
 ]
 
 
-def tfp_trace_to_arviz(tfp_trace, var_names=None, sample_stats_name=sample_stats_name):
+<span style="color:#66d9ef">def</span> <span style="color:#a6e22e">tfp_trace_to_arviz</span>(tfp_trace, var_names<span style="color:#f92672">=</span>None, sample_stats_name<span style="color:#f92672">=</span>sample_stats_name):
 
-    samps, trace = tfp_trace
-    if var_names is None:
-        var_names = [&quot;var &quot; + str(x) for x in range(len(samps))]
+    samps, trace <span style="color:#f92672">=</span> tfp_trace
+    <span style="color:#66d9ef">if</span> var_names <span style="color:#f92672">is</span> None:
+        var_names <span style="color:#f92672">=</span> [<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">var </span><span style="color:#e6db74">&#34;</span> <span style="color:#f92672">+</span> str(x) <span style="color:#66d9ef">for</span> x <span style="color:#f92672">in</span> range(len(samps))]
 
-    sample_stats = {k: v.numpy().T for k, v in zip(sample_stats_name, trace)}
-    posterior = {
-        name: tf.transpose(samp, [1, 0, 2]).numpy()
-        for name, samp in zip(var_names, samps)
+    sample_stats <span style="color:#f92672">=</span> {k: v<span style="color:#f92672">.</span>numpy()<span style="color:#f92672">.</span>T <span style="color:#66d9ef">for</span> k, v <span style="color:#f92672">in</span> zip(sample_stats_name, trace)}
+    posterior <span style="color:#f92672">=</span> {
+        name: tf<span style="color:#f92672">.</span>transpose(samp, [<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">2</span>])<span style="color:#f92672">.</span>numpy()
+        <span style="color:#66d9ef">for</span> name, samp <span style="color:#f92672">in</span> zip(var_names, samps)
     }
-    return az.from_dict(posterior=posterior, sample_stats=sample_stats)
-</code></pre>
-
-<p>For more details about calling TFP&rsquo;s NUTS sampler, and the helper functions defined above, see <a href="https://adamhaber.github.io/2019/10/21/Bayesian-golf-puttings,-NUTS,-and-optimizing-your-sampling-function-with-TensorFlow-Probability.html" target="_blank">here</a>.</p>
-
+    <span style="color:#66d9ef">return</span> az<span style="color:#f92672">.</span>from_dict(posterior<span style="color:#f92672">=</span>posterior, sample_stats<span style="color:#f92672">=</span>sample_stats)
+</code></pre></div><p>For more details about calling TFP&rsquo;s NUTS sampler, and the helper functions defined above, see <a href="https://adamhaber.github.io/2019/10/21/Bayesian-golf-puttings,-NUTS,-and-optimizing-your-sampling-function-with-TensorFlow-Probability.html">here</a>.</p>
 <h2 id="first-implemetation">First implemetation</h2>
-
-<p>We now turn to implement the whole model in TFP. Since there aren&rsquo;t many complicated intermediate calculations, a <code>JointDistributionSequential</code> is a reasonable choice for implementing the model. For a more detailed explanation on the different <code>JointDistribution</code> alternatives, see <a href="https://adamhaber.github.io/2019/10/21/Bayesian-golf-puttings,-NUTS,-and-optimizing-your-sampling-function-with-TensorFlow-Probability.html#model-1" target="_blank">this post</a>.</p>
-
-<pre><code class="language-python">model = tfd.JointDistributionSequential(
+<p>We now turn to implement the whole model in TFP. Since there aren&rsquo;t many complicated intermediate calculations, a <code>JointDistributionSequential</code> is a reasonable choice for implementing the model. For a more detailed explanation on the different <code>JointDistribution</code> alternatives, see <a href="https://adamhaber.github.io/2019/10/21/Bayesian-golf-puttings,-NUTS,-and-optimizing-your-sampling-function-with-TensorFlow-Probability.html#model-1">this post</a>.</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">model <span style="color:#f92672">=</span> tfd<span style="color:#f92672">.</span>JointDistributionSequential(
     [
-        tfd.HalfNormal(1),  # sigma_state
-        lambda sigma_state: tfd.Sample(tfd.Normal(0, sigma_state), sample_shape=50),
-        tfd.HalfNormal(1),  # sigma_eth
-        lambda sigma_eth: tfd.Sample(tfd.Normal(0, sigma_eth), sample_shape=3),
-        tfd.HalfNormal(1),  # sigma_income
-        lambda sigma_income: tfd.Sample(tfd.Normal(0, sigma_income), sample_shape=3),
-        tfd.HalfNormal(1),  # sigma_age
-        lambda sigma_age: tfd.Sample(tfd.Normal(0, sigma_age), sample_shape=7),
-        tfd.Normal(0, 10),  # intercept
-        tfd.Sample(tfd.Normal(0, 2.5), sample_shape=13),  # coeffs
-        lambda coeffs, intercept, coef_age, sigma_age, coef_income, sigma_income, coef_eth, sigma_eth, coef_state: tfd.Independent(
-            tfd.Binomial(
-                total_count=1,
-                logits=intercept[:, tf.newaxis]
-                + coeffs @ tf.cast(features, tf.float32)
-                + tf.squeeze(
-                    tf.gather(coef_age, tf.cast(sample[&quot;age&quot;], tf.int32), axis=-1)
+        tfd<span style="color:#f92672">.</span>HalfNormal(<span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># sigma_state</span>
+        <span style="color:#66d9ef">lambda</span> sigma_state: tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, sigma_state), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">50</span>),
+        tfd<span style="color:#f92672">.</span>HalfNormal(<span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># sigma_eth</span>
+        <span style="color:#66d9ef">lambda</span> sigma_eth: tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, sigma_eth), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>),
+        tfd<span style="color:#f92672">.</span>HalfNormal(<span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># sigma_income</span>
+        <span style="color:#66d9ef">lambda</span> sigma_income: tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, sigma_income), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>),
+        tfd<span style="color:#f92672">.</span>HalfNormal(<span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># sigma_age</span>
+        <span style="color:#66d9ef">lambda</span> sigma_age: tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, sigma_age), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">7</span>),
+        tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">10</span>),  <span style="color:#75715e"># intercept</span>
+        tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">2.5</span>), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">13</span>),  <span style="color:#75715e"># coeffs</span>
+        <span style="color:#66d9ef">lambda</span> coeffs, intercept, coef_age, sigma_age, coef_income, sigma_income, coef_eth, sigma_eth, coef_state: tfd<span style="color:#f92672">.</span>Independent(
+            tfd<span style="color:#f92672">.</span>Binomial(
+                total_count<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>,
+                logits<span style="color:#f92672">=</span>intercept[:, tf<span style="color:#f92672">.</span>newaxis]
+                <span style="color:#f92672">+</span> coeffs <span style="color:#960050;background-color:#1e0010">@</span> tf<span style="color:#f92672">.</span>cast(features, tf<span style="color:#f92672">.</span>float32)
+                <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(
+                    tf<span style="color:#f92672">.</span>gather(coef_age, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
                 )
-                + tf.squeeze(
-                    tf.gather(coef_income, tf.cast(sample[&quot;income&quot;], tf.int32), axis=-1)
+                <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(
+                    tf<span style="color:#f92672">.</span>gather(coef_income, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
                 )
-                + tf.squeeze(
-                    tf.gather(coef_eth, tf.cast(sample[&quot;eth&quot;], tf.int32), axis=-1)
+                <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(
+                    tf<span style="color:#f92672">.</span>gather(coef_eth, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
                 )
-                + tf.squeeze(
-                    tf.gather(coef_state, tf.cast(sample[&quot;state&quot;], tf.int32), axis=-1)
+                <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(
+                    tf<span style="color:#f92672">.</span>gather(coef_state, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
                 ),
             ),
-            reinterpreted_batch_ndims=1,
+            reinterpreted_batch_ndims<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>,
         ),
     ]
 )
-</code></pre>
-
-<p>The model description isn&rsquo;t short, but it doesn&rsquo;t contain anything we haven&rsquo;t covered in previous posts. Let&rsquo;s call <code>.sample</code> and <code>.log_prob</code> just to make sure everything works:</p>
-
-<pre><code class="language-python">[s.shape for s in model.sample(n_chains)]
-</code></pre>
-
-<pre><code>[TensorShape([4]),
+</code></pre></div><p>The model description isn&rsquo;t short, but it doesn&rsquo;t contain anything we haven&rsquo;t covered in previous posts. Let&rsquo;s call <code>.sample</code> and <code>.log_prob</code> just to make sure everything works:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">[s<span style="color:#f92672">.</span>shape <span style="color:#66d9ef">for</span> s <span style="color:#f92672">in</span> model<span style="color:#f92672">.</span>sample(n_chains)]
+</code></pre></div><pre><code>[TensorShape([4]),
  TensorShape([4, 50]),
  TensorShape([4]),
  TensorShape([4, 3]),
@@ -1305,141 +1175,98 @@ def tfp_trace_to_arviz(tfp_trace, var_names=None, sample_stats_name=sample_stats
  TensorShape([4, 13]),
  TensorShape([4, 1200])]
 </code></pre>
-
-<pre><code class="language-python">model.log_prob(model.sample(n_chains))
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">model<span style="color:#f92672">.</span>log_prob(model<span style="color:#f92672">.</span>sample(n_chains))
+</code></pre></div><pre><code>&lt;tf.Tensor: shape=(4,), dtype=float32, numpy=array([-121.06135 ,   21.950146,  -69.38415 , -224.08742 ], dtype=float32)&gt;
 </code></pre>
-
-<pre><code>&lt;tf.Tensor: shape=(4,), dtype=float32, numpy=array([-121.06135 ,   21.950146,  -69.38415 , -224.08742 ], dtype=float32)&gt;
-</code></pre>
-
 <p>So our model technically works&hellip; but does it makes sense?</p>
-
 <h2 id="prior-predictive-checks">Prior predictive checks</h2>
-
-<p>Prior predictive checks are an extremely valuable technique to assess your model and your priors, before seeing any data. To learn more about PPCs (horrible acronym as the first P can also stand for <em>posterior</em>), I highly recommend Michael Betancourt&rsquo;s <a href="https://betanalpha.github.io/assets/case_studies/principled_bayesian_workflow.html" target="_blank">principled bayesian workflow</a> case study.</p>
-
+<p>Prior predictive checks are an extremely valuable technique to assess your model and your priors, before seeing any data. To learn more about PPCs (horrible acronym as the first P can also stand for <em>posterior</em>), I highly recommend Michael Betancourt&rsquo;s <a href="https://betanalpha.github.io/assets/case_studies/principled_bayesian_workflow.html">principled bayesian workflow</a> case study.</p>
 <p>Anyway, let&rsquo;s generate samples from our model, and use the samples to compute the logits (the linear expression within the <code>inv_logit</code> function):</p>
-
-<pre><code class="language-python">inits = model.sample(n_chains)
-</code></pre>
-
-<pre><code class="language-python">coeffs, intercept, coef_age, _, coef_income, _, coef_eth, _, coef_state = inits[1:10][
-    ::-1
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">inits <span style="color:#f92672">=</span> model<span style="color:#f92672">.</span>sample(n_chains)
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">coeffs, intercept, coef_age, _, coef_income, _, coef_eth, _, coef_state <span style="color:#f92672">=</span> inits[<span style="color:#ae81ff">1</span>:<span style="color:#ae81ff">10</span>][
+    ::<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>
 ]
-</code></pre>
-
-<pre><code class="language-python">logits = (
-    intercept[:, tf.newaxis]
-    + coeffs @ tf.cast(features, tf.float32)
-    + tf.squeeze(tf.gather(coef_age, tf.cast(sample[&quot;age&quot;], tf.int32), axis=-1))
-    + tf.squeeze(tf.gather(coef_income, tf.cast(sample[&quot;income&quot;], tf.int32), axis=-1))
-    + tf.squeeze(tf.gather(coef_eth, tf.cast(sample[&quot;eth&quot;], tf.int32), axis=-1))
-    + tf.squeeze(tf.gather(coef_state, tf.cast(sample[&quot;state&quot;], tf.int32), axis=-1))
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">logits <span style="color:#f92672">=</span> (
+    intercept[:, tf<span style="color:#f92672">.</span>newaxis]
+    <span style="color:#f92672">+</span> coeffs <span style="color:#960050;background-color:#1e0010">@</span> tf<span style="color:#f92672">.</span>cast(features, tf<span style="color:#f92672">.</span>float32)
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(tf<span style="color:#f92672">.</span>gather(coef_age, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>))
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(tf<span style="color:#f92672">.</span>gather(coef_income, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>))
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(tf<span style="color:#f92672">.</span>gather(coef_eth, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>))
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(tf<span style="color:#f92672">.</span>gather(coef_state, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>))
 )
-</code></pre>
-
-<p>Each chain gives us 1200 different numbers - the log-odds for cat preference for our 1200 sampled individuals. Let&rsquo;s plot these four histograms:</p>
-
-<pre><code class="language-python">for i, l in enumerate(logits):
-    sns.distplot(l, bins=30, label=f&quot;from chain {i}&quot;)
-plt.legend()
-plt.xlabel(&quot;${\\rm logit}\\left(\\theta_j\\right)$&quot;)
-lim = plt.xlim();
-</code></pre>
-
-<p><img src="output_67_0.png" alt="png" /></p>
-
+</code></pre></div><p>Each chain gives us 1200 different numbers - the log-odds for cat preference for our 1200 sampled individuals. Let&rsquo;s plot these four histograms:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#66d9ef">for</span> i, l <span style="color:#f92672">in</span> enumerate(logits):
+    sns<span style="color:#f92672">.</span>distplot(l, bins<span style="color:#f92672">=</span><span style="color:#ae81ff">30</span>, label<span style="color:#f92672">=</span>f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">from chain {i}</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>legend()
+plt<span style="color:#f92672">.</span>xlabel(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">${</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">rm logit}</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">left(</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">theta_j</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">right)$</span><span style="color:#e6db74">&#34;</span>)
+lim <span style="color:#f92672">=</span> plt<span style="color:#f92672">.</span>xlim();
+</code></pre></div><p><img src="output_67_0.png" alt="png"></p>
 <p>Note that it&rsquo;s OK that each color (each chain) is multimodal - this just means that we&rsquo;re inferring different &ldquo;types&rdquo; of cats preference across groups.</p>
-
 <p>The problem with what we got is the <em>scale</em> - having ${\rm logit}\left(\theta_j\right)=-15$ means $\theta_j=0.000000003&hellip;$ which doesn&rsquo;t really makes sense, even for a group that <em>really</em> likes dogs. This implies that our priors are way too diffuse, the normal(0,10) being the primary suspect. So let&rsquo;s make everything normal(0,1) and do this again:</p>
-
 <h1 id="same-likelihood-better-priors">Same likelihood, better priors</h1>
-
-<pre><code class="language-python">model = tfd.JointDistributionSequential(
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">model <span style="color:#f92672">=</span> tfd<span style="color:#f92672">.</span>JointDistributionSequential(
     [
-        tfd.HalfNormal(1),  # sigma_state
-        lambda sigma_state: tfd.Sample(tfd.Normal(0, sigma_state), sample_shape=50),
-        tfd.HalfNormal(1),  # sigma_eth
-        lambda sigma_eth: tfd.Sample(tfd.Normal(0, sigma_eth), sample_shape=3),
-        tfd.HalfNormal(1),  # sigma_income
-        lambda sigma_income: tfd.Sample(tfd.Normal(0, sigma_income), sample_shape=3),
-        tfd.HalfNormal(1),  # sigma_age
-        lambda sigma_age: tfd.Sample(tfd.Normal(0, sigma_age), sample_shape=7),
-        tfd.Normal(0, 1),  # intercept
-        tfd.Sample(tfd.Normal(0, 1), sample_shape=13),  # coeffs
-        lambda coeffs, intercept, coef_age, a, coef_income, b, coef_eth, c, coef_state: tfd.Independent(
-            tfd.Binomial(
-                total_count=1,
-                logits=intercept[:, tf.newaxis]
-                + coeffs @ tf.cast(features, tf.float32)
-                + tf.squeeze(
-                    tf.gather(coef_age, tf.cast(sample[&quot;age&quot;], tf.int32), axis=-1)
+        tfd<span style="color:#f92672">.</span>HalfNormal(<span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># sigma_state</span>
+        <span style="color:#66d9ef">lambda</span> sigma_state: tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, sigma_state), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">50</span>),
+        tfd<span style="color:#f92672">.</span>HalfNormal(<span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># sigma_eth</span>
+        <span style="color:#66d9ef">lambda</span> sigma_eth: tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, sigma_eth), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>),
+        tfd<span style="color:#f92672">.</span>HalfNormal(<span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># sigma_income</span>
+        <span style="color:#66d9ef">lambda</span> sigma_income: tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, sigma_income), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>),
+        tfd<span style="color:#f92672">.</span>HalfNormal(<span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># sigma_age</span>
+        <span style="color:#66d9ef">lambda</span> sigma_age: tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, sigma_age), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">7</span>),
+        tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">1</span>),  <span style="color:#75715e"># intercept</span>
+        tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">1</span>), sample_shape<span style="color:#f92672">=</span><span style="color:#ae81ff">13</span>),  <span style="color:#75715e"># coeffs</span>
+        <span style="color:#66d9ef">lambda</span> coeffs, intercept, coef_age, a, coef_income, b, coef_eth, c, coef_state: tfd<span style="color:#f92672">.</span>Independent(
+            tfd<span style="color:#f92672">.</span>Binomial(
+                total_count<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>,
+                logits<span style="color:#f92672">=</span>intercept[:, tf<span style="color:#f92672">.</span>newaxis]
+                <span style="color:#f92672">+</span> coeffs <span style="color:#960050;background-color:#1e0010">@</span> tf<span style="color:#f92672">.</span>cast(features, tf<span style="color:#f92672">.</span>float32)
+                <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(
+                    tf<span style="color:#f92672">.</span>gather(coef_age, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
                 )
-                + tf.squeeze(
-                    tf.gather(coef_income, tf.cast(sample[&quot;income&quot;], tf.int32), axis=-1)
+                <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(
+                    tf<span style="color:#f92672">.</span>gather(coef_income, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
                 )
-                + tf.squeeze(
-                    tf.gather(coef_eth, tf.cast(sample[&quot;eth&quot;], tf.int32), axis=-1)
+                <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(
+                    tf<span style="color:#f92672">.</span>gather(coef_eth, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
                 )
-                + tf.squeeze(
-                    tf.gather(coef_state, tf.cast(sample[&quot;state&quot;], tf.int32), axis=-1)
+                <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(
+                    tf<span style="color:#f92672">.</span>gather(coef_state, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
                 ),
             ),
-            reinterpreted_batch_ndims=1,
+            reinterpreted_batch_ndims<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>,
         ),
     ]
 )
-</code></pre>
-
-<pre><code class="language-python">inits = model.sample(n_chains)
-</code></pre>
-
-<pre><code class="language-python">coeffs, intercept, coef_age, _, coef_income, _, coef_eth, _, coef_state = inits[1:10][
-    ::-1
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">inits <span style="color:#f92672">=</span> model<span style="color:#f92672">.</span>sample(n_chains)
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">coeffs, intercept, coef_age, _, coef_income, _, coef_eth, _, coef_state <span style="color:#f92672">=</span> inits[<span style="color:#ae81ff">1</span>:<span style="color:#ae81ff">10</span>][
+    ::<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>
 ]
-</code></pre>
-
-<pre><code class="language-python">logits = (
-    intercept[:, tf.newaxis]
-    + coeffs @ tf.cast(features, tf.float32)
-    + tf.squeeze(tf.gather(coef_age, tf.cast(sample[&quot;age&quot;], tf.int32), axis=-1))
-    + tf.squeeze(tf.gather(coef_income, tf.cast(sample[&quot;income&quot;], tf.int32), axis=-1))
-    + tf.squeeze(tf.gather(coef_eth, tf.cast(sample[&quot;eth&quot;], tf.int32), axis=-1))
-    + tf.squeeze(tf.gather(coef_state, tf.cast(sample[&quot;state&quot;], tf.int32), axis=-1))
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">logits <span style="color:#f92672">=</span> (
+    intercept[:, tf<span style="color:#f92672">.</span>newaxis]
+    <span style="color:#f92672">+</span> coeffs <span style="color:#960050;background-color:#1e0010">@</span> tf<span style="color:#f92672">.</span>cast(features, tf<span style="color:#f92672">.</span>float32)
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(tf<span style="color:#f92672">.</span>gather(coef_age, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>))
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(tf<span style="color:#f92672">.</span>gather(coef_income, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>))
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(tf<span style="color:#f92672">.</span>gather(coef_eth, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>))
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>squeeze(tf<span style="color:#f92672">.</span>gather(coef_state, tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>))
 )
-</code></pre>
-
-<pre><code class="language-python">for i, l in enumerate(logits):
-    sns.distplot(l, bins=30, label=f&quot;from chain {i}&quot;)
-plt.legend()
-plt.xlabel(&quot;${\\rm logit}\\left(\\theta_j\\right)$&quot;)
-plt.xlim(*lim);
-</code></pre>
-
-<p><img src="output_74_0.png" alt="png" /></p>
-
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#66d9ef">for</span> i, l <span style="color:#f92672">in</span> enumerate(logits):
+    sns<span style="color:#f92672">.</span>distplot(l, bins<span style="color:#f92672">=</span><span style="color:#ae81ff">30</span>, label<span style="color:#f92672">=</span>f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">from chain {i}</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>legend()
+plt<span style="color:#f92672">.</span>xlabel(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">${</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">rm logit}</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">left(</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">theta_j</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">right)$</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>xlim(<span style="color:#f92672">*</span>lim);
+</code></pre></div><p><img src="output_74_0.png" alt="png"></p>
 <p>This makes much more sense. The variance between groups is still there but it doesn&rsquo;t spread across several order of magnitude (that is, with this prior it&rsquo;s no longer plausible that some groups love cats 10 million times more than other groups). This seems like a good starting point.</p>
-
 <p>Note that the overly wide priors are also very problematic, inference wise - running the same notebook with the first model returns all sorts of sampling problems (divergent transitions, bad mixing, random seed dependence etc) while the 2nd, more informed version does not.</p>
-
 <h2 id="getting-the-shapes-right">Getting the shapes right</h2>
-
 <p>This is, by far, the hardest thing for me when building a probablistic model with TFP. Knowing where to put <code>[...,],  tf.newaxis</code> or <code>[None,]</code> requires some trial and error - here are some checks to verify we got this right (after <em>a lot</em> of failed attempts and some help from Junpeng Lao):</p>
-
 <p>First, we want to make sure the model can evaluate the log probability of its own samples, and that we get <code>n_chains</code> different numbers:</p>
-
-<pre><code class="language-python">model.log_prob(inits)
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">model<span style="color:#f92672">.</span>log_prob(inits)
+</code></pre></div><pre><code>&lt;tf.Tensor: shape=(4,), dtype=float32, numpy=array([-619.5229 , -520.8101 , -460.97076, -609.21765], dtype=float32)&gt;
 </code></pre>
-
-<pre><code>&lt;tf.Tensor: shape=(4,), dtype=float32, numpy=array([-619.5229 , -520.8101 , -460.97076, -609.21765], dtype=float32)&gt;
-</code></pre>
-
 <p>Second, we want to make sure that all shapes of the different parameters in our samples are as we expect, which basically should be the number of chains in the first axis and the shape of whatever it is we&rsquo;re sampling in the rest - or nothing, if it&rsquo;s just a scalar:</p>
-
-<pre><code class="language-python">[s.shape for s in inits]
-</code></pre>
-
-<pre><code>[TensorShape([4]),
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">[s<span style="color:#f92672">.</span>shape <span style="color:#66d9ef">for</span> s <span style="color:#f92672">in</span> inits]
+</code></pre></div><pre><code>[TensorShape([4]),
  TensorShape([4, 50]),
  TensorShape([4]),
  TensorShape([4, 3]),
@@ -1451,61 +1278,42 @@ plt.xlim(*lim);
  TensorShape([4, 13]),
  TensorShape([4, 1200])]
 </code></pre>
-
 <p>The main thing to look out for here are redundant extra dimensions (for example, <code>TensorShape([4, 1])</code> instead of <code>TensorShape([4])</code> - these will almost always cause broadcasting issues.</p>
-
 <p>Next, we want to add an extra axis for the data we condition on. Again, this is for broadcasting purposes - we want to make sure <code>tf</code> &ldquo;replicates&rdquo; the data across different chains.</p>
-
-<pre><code class="language-python">tf.cast(sample[&quot;cat_pref&quot;], tf.float32)[tf.newaxis, ...].shape
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>float32)[tf<span style="color:#f92672">.</span>newaxis, <span style="color:#f92672">.</span><span style="color:#f92672">.</span><span style="color:#f92672">.</span>]<span style="color:#f92672">.</span>shape
+</code></pre></div><pre><code>TensorShape([1, 1200])
 </code></pre>
-
-<pre><code>TensorShape([1, 1200])
-</code></pre>
-
 <p>Finally, the <code>log_prob</code> function closure - we want to make sure our <code>log_prob</code> function gets as inputs all the different parameters, concatenates them with the data we&rsquo;re conditioning on, and then uses the original model <code>log_prob</code> function to evaluate; practically, we want to verify that if we pass all the parameters (<em>without</em> the conditioning data), we get <code>n_chains</code> different numbers:</p>
-
-<pre><code class="language-python">lp = lambda *x: model.log_prob(
-    list(x) + [tf.cast(sample[&quot;cat_pref&quot;], tf.float32)[tf.newaxis, ...]]
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">lp <span style="color:#f92672">=</span> <span style="color:#66d9ef">lambda</span> <span style="color:#f92672">*</span>x: model<span style="color:#f92672">.</span>log_prob(
+    list(x) <span style="color:#f92672">+</span> [tf<span style="color:#f92672">.</span>cast(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>float32)[tf<span style="color:#f92672">.</span>newaxis, <span style="color:#f92672">.</span><span style="color:#f92672">.</span><span style="color:#f92672">.</span>]]
 )
-lp(*inits[:-1])
+lp(<span style="color:#f92672">*</span>inits[:<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>])
+</code></pre></div><pre><code>&lt;tf.Tensor: shape=(4,), dtype=float32, numpy=array([-1315.5156, -1436.2715, -1799.2578, -1901.1874], dtype=float32)&gt;
 </code></pre>
-
-<pre><code>&lt;tf.Tensor: shape=(4,), dtype=float32, numpy=array([-1315.5156, -1436.2715, -1799.2578, -1901.1874], dtype=float32)&gt;
-</code></pre>
-
 <h2 id="inference">Inference</h2>
-
 <p>With sensible priors and TFP shape issues dealt with, we can proceed with actually runnning the sampler.</p>
-
-<pre><code class="language-python">inits = [
-    tf.random.uniform(s.shape, -2, 2, tf.float32, name=&quot;initializer&quot;) for s in inits
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">inits <span style="color:#f92672">=</span> [
+    tf<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>uniform(s<span style="color:#f92672">.</span>shape, <span style="color:#f92672">-</span><span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">2</span>, tf<span style="color:#f92672">.</span>float32, name<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">initializer</span><span style="color:#e6db74">&#34;</span>) <span style="color:#66d9ef">for</span> s <span style="color:#f92672">in</span> inits
 ]
-</code></pre>
-
-<pre><code class="language-python">trace, kr = run_nuts(
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">trace, kr <span style="color:#f92672">=</span> run_nuts(
     lp,
-    inits[:-1],
-    bijectors_list=[
-        tfb.Exp(),
-        tfb.Identity(),
-        tfb.Exp(),
-        tfb.Identity(),
-        tfb.Exp(),
-        tfb.Identity(),
-        tfb.Exp(),
-        tfb.Identity(),
-        tfb.Identity(),
-        tfb.Identity(),
+    inits[:<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>],
+    bijectors_list<span style="color:#f92672">=</span>[
+        tfb<span style="color:#f92672">.</span>Exp(),
+        tfb<span style="color:#f92672">.</span>Identity(),
+        tfb<span style="color:#f92672">.</span>Exp(),
+        tfb<span style="color:#f92672">.</span>Identity(),
+        tfb<span style="color:#f92672">.</span>Exp(),
+        tfb<span style="color:#f92672">.</span>Identity(),
+        tfb<span style="color:#f92672">.</span>Exp(),
+        tfb<span style="color:#f92672">.</span>Identity(),
+        tfb<span style="color:#f92672">.</span>Identity(),
+        tfb<span style="color:#f92672">.</span>Identity(),
     ],
 )
-</code></pre>
-
-<p><em>Always</em> check your TF shapes:</p>
-
-<pre><code class="language-python">[s.shape for s in trace]
-</code></pre>
-
-<pre><code>[TensorShape([1000, 4]),
+</code></pre></div><p><em>Always</em> check your TF shapes:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">[s<span style="color:#f92672">.</span>shape <span style="color:#66d9ef">for</span> s <span style="color:#f92672">in</span> trace]
+</code></pre></div><pre><code>[TensorShape([1000, 4]),
  TensorShape([1000, 4, 50]),
  TensorShape([1000, 4]),
  TensorShape([1000, 4, 3]),
@@ -1516,17 +1324,11 @@ lp(*inits[:-1])
  TensorShape([1000, 4]),
  TensorShape([1000, 4, 13])]
 </code></pre>
-
 <p>This looks good; for arviz intergration purposes, we&rsquo;ll add an extra axis for the parameters whose tensor shape is <code>TensorShape([1000, 4])</code>, and then call our <code>tfp_trace_to_arviz</code> helper function:</p>
-
-<pre><code class="language-python">trace_ex = [s[..., tf.newaxis] if len(s.shape) == 2 else s for s in trace]
-az_trace = tfp_trace_to_arviz((trace_ex, kr))
-</code></pre>
-
-<pre><code class="language-python">az.summary(az_trace).head(5)
-</code></pre>
-
-<table>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">trace_ex <span style="color:#f92672">=</span> [s[<span style="color:#f92672">.</span><span style="color:#f92672">.</span><span style="color:#f92672">.</span>, tf<span style="color:#f92672">.</span>newaxis] <span style="color:#66d9ef">if</span> len(s<span style="color:#f92672">.</span>shape) <span style="color:#f92672">==</span> <span style="color:#ae81ff">2</span> <span style="color:#66d9ef">else</span> s <span style="color:#66d9ef">for</span> s <span style="color:#f92672">in</span> trace]
+az_trace <span style="color:#f92672">=</span> tfp_trace_to_arviz((trace_ex, kr))
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">az<span style="color:#f92672">.</span>summary(az_trace)<span style="color:#f92672">.</span>head(<span style="color:#ae81ff">5</span>)
+</code></pre></div><table>
 <thead>
 <tr>
 <th align="left"></th>
@@ -1543,7 +1345,6 @@ az_trace = tfp_trace_to_arviz((trace_ex, kr))
 <th align="right">r_hat</th>
 </tr>
 </thead>
-
 <tbody>
 <tr>
 <td align="left">var 0[0]</td>
@@ -1559,7 +1360,6 @@ az_trace = tfp_trace_to_arviz((trace_ex, kr))
 <td align="right">2668</td>
 <td align="right">1</td>
 </tr>
-
 <tr>
 <td align="left">var 1[0]</td>
 <td align="right">0.016</td>
@@ -1574,7 +1374,6 @@ az_trace = tfp_trace_to_arviz((trace_ex, kr))
 <td align="right">2538</td>
 <td align="right">1</td>
 </tr>
-
 <tr>
 <td align="left">var 1[1]</td>
 <td align="right">0.025</td>
@@ -1589,7 +1388,6 @@ az_trace = tfp_trace_to_arviz((trace_ex, kr))
 <td align="right">2918</td>
 <td align="right">1</td>
 </tr>
-
 <tr>
 <td align="left">var 1[2]</td>
 <td align="right">0.477</td>
@@ -1604,7 +1402,6 @@ az_trace = tfp_trace_to_arviz((trace_ex, kr))
 <td align="right">2521</td>
 <td align="right">1</td>
 </tr>
-
 <tr>
 <td align="left">var 1[3]</td>
 <td align="right">-0.36</td>
@@ -1621,13 +1418,9 @@ az_trace = tfp_trace_to_arviz((trace_ex, kr))
 </tr>
 </tbody>
 </table>
-
 <p>Sampling diagnostics look good; we have no divergent transitions, and $\hat{R}$ values are all close to 1:</p>
-
-<pre><code class="language-python">az.summary(az_trace)[&quot;r_hat&quot;].describe()
-</code></pre>
-
-<pre><code>count    81.0
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">az<span style="color:#f92672">.</span>summary(az_trace)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">r_hat</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>describe()
+</code></pre></div><pre><code>count    81.0
 mean      1.0
 std       0.0
 min       1.0
@@ -1637,140 +1430,117 @@ min       1.0
 max       1.0
 Name: r_hat, dtype: float64
 </code></pre>
-
 <p>We won&rsquo;t go down the model-diagnostics-rabbit-hole now; we&rsquo;re here to learn about Mister P.</p>
-
 <h2 id="p-part">P part</h2>
-
 <p>So far we&rsquo;ve defined, critisized and fitted a multilevel logisitic regression model. Now comes the poststratification part. Poststratification is a technical and intimidating word; it basically means &ldquo;adjusting the inferences from my sample to the population by using additional knowledge about proportions in the population&rdquo;. To do so, we&rsquo;ll:</p>
-
 <ol>
 <li>Compute a design matrix $X$ for the population.</li>
 <li>Use our 4000 sampled parameters to compute 4000 different logits for each group in the population. This will yield a 4000x6300 matrix.</li>
 <li>For each row (representing a single draw from our posterior), we&rsquo;ll compute the population mean as a weighted sum of per-group cat preference and group&rsquo;s size. This will give us a vector of 4000 numbers.</li>
-
-<li><p>The mean of these 4000 numbers will be our estimate for the population mean.</p>
-
-<pre><code class="language-python">post_factors = pd.get_dummies(poststrat[[&quot;sex&quot;, &quot;age&quot;]].astype(&quot;category&quot;)).drop(
-[&quot;sex_0&quot;, &quot;age_0&quot;], axis=1
-)
-post_interactions = pd.DataFrame(
-post_factors.drop(&quot;sex_1&quot;, axis=1).values * post_factors[&quot;sex_1&quot;].values[:, None],
-columns=[f&quot;sex_1*age_{i}&quot; for i in range(6)],
-)
-post_features = pd.concat([post_factors, post_interactions], axis=1).values.T
-</code></pre>
-
-<pre><code class="language-python">intercept = trace[8]
-coeffs = trace[9]
-coef_age = trace[7]
-coef_income = trace[5]
-coef_eth = trace[3]
-coef_state = trace[1]
-
-logits = (
-intercept[..., tf.newaxis]
-+ coeffs @ tf.cast(post_features, tf.float32)
-+ tf.gather(trace[7], tf.cast(poststrat[&quot;age&quot;], tf.int32), axis=-1)
-+ tf.gather(coef_income, tf.cast(poststrat[&quot;income&quot;], tf.int32), axis=-1)
-+ tf.gather(coef_eth, tf.cast(poststrat[&quot;eth&quot;], tf.int32), axis=-1)
-+ tf.gather(coef_state, tf.cast(poststrat[&quot;state&quot;], tf.int32), axis=-1)
-)
-posterior_prob = inv_logit(logits)
-posterior_prob = posterior_prob.reshape(-1, 6300)
-posterior_prob.shape
-</code></pre>
-
-<p>(4000, 6300)</p>
-
-<pre><code class="language-python">poststrat_prob = posterior_prob @ poststrat[&quot;N&quot;][:, None] / poststrat[&quot;N&quot;].sum()
-poststrat_prob.shape
-</code></pre>
-
-<p>(4000, 1)</p></li>
+<li>The mean of these 4000 numbers will be our estimate for the population mean.</li>
 </ol>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">post_factors <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>get_dummies(poststrat[[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>]]<span style="color:#f92672">.</span>astype(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">category</span><span style="color:#e6db74">&#34;</span>))<span style="color:#f92672">.</span>drop(
+    [<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_0</span><span style="color:#e6db74">&#34;</span>, <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age_0</span><span style="color:#e6db74">&#34;</span>], axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>
+)
+post_interactions <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>DataFrame(
+    post_factors<span style="color:#f92672">.</span>drop(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1</span><span style="color:#e6db74">&#34;</span>, axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)<span style="color:#f92672">.</span>values <span style="color:#f92672">*</span> post_factors[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>values[:, None],
+    columns<span style="color:#f92672">=</span>[f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sex_1*age_{i}</span><span style="color:#e6db74">&#34;</span> <span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(<span style="color:#ae81ff">6</span>)],
+)
+post_features <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>concat([post_factors, post_interactions], axis<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)<span style="color:#f92672">.</span>values<span style="color:#f92672">.</span>T
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">intercept <span style="color:#f92672">=</span> trace[<span style="color:#ae81ff">8</span>]
+coeffs <span style="color:#f92672">=</span> trace[<span style="color:#ae81ff">9</span>]
+coef_age <span style="color:#f92672">=</span> trace[<span style="color:#ae81ff">7</span>]
+coef_income <span style="color:#f92672">=</span> trace[<span style="color:#ae81ff">5</span>]
+coef_eth <span style="color:#f92672">=</span> trace[<span style="color:#ae81ff">3</span>]
+coef_state <span style="color:#f92672">=</span> trace[<span style="color:#ae81ff">1</span>]
 
-<p>So how good is MRP? We plot the histogram of our 4000 different estimates of the population mean, together with the estimate from the sample (dashed line) and the true mean:</p>
-
-<pre><code class="language-python">sns.distplot(poststrat_prob, bins=100)
-plt.axvline(true_pop_pref, label=&quot;population mean&quot;, lw=3, c=&quot;k&quot;)
-plt.axvline(sample[&quot;cat_pref&quot;].mean(), label=&quot;sample mean&quot;, lw=3, ls=&quot;--&quot;, c=&quot;k&quot;)
-plt.legend();
+logits <span style="color:#f92672">=</span> (
+    intercept[<span style="color:#f92672">.</span><span style="color:#f92672">.</span><span style="color:#f92672">.</span>, tf<span style="color:#f92672">.</span>newaxis]
+    <span style="color:#f92672">+</span> coeffs <span style="color:#960050;background-color:#1e0010">@</span> tf<span style="color:#f92672">.</span>cast(post_features, tf<span style="color:#f92672">.</span>float32)
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(trace[<span style="color:#ae81ff">7</span>], tf<span style="color:#f92672">.</span>cast(poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(coef_income, tf<span style="color:#f92672">.</span>cast(poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(coef_eth, tf<span style="color:#f92672">.</span>cast(poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
+    <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(coef_state, tf<span style="color:#f92672">.</span>cast(poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32), axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)
+)
+posterior_prob <span style="color:#f92672">=</span> inv_logit(logits)
+posterior_prob <span style="color:#f92672">=</span> posterior_prob<span style="color:#f92672">.</span>reshape(<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">6300</span>)
+posterior_prob<span style="color:#f92672">.</span>shape
+</code></pre></div><pre><code>(4000, 6300)
 </code></pre>
-
-<p><img src="output_106_0.png" alt="png" /></p>
-
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">poststrat_prob <span style="color:#f92672">=</span> posterior_prob <span style="color:#960050;background-color:#1e0010">@</span> poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>][:, None] <span style="color:#f92672">/</span> poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>sum()
+poststrat_prob<span style="color:#f92672">.</span>shape
+</code></pre></div><pre><code>(4000, 1)
+</code></pre>
+<p>So how good is MRP? We plot the histogram of our 4000 different estimates of the population mean, together with the estimate from the sample (dashed line) and the true mean:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">sns<span style="color:#f92672">.</span>distplot(poststrat_prob, bins<span style="color:#f92672">=</span><span style="color:#ae81ff">100</span>)
+plt<span style="color:#f92672">.</span>axvline(true_pop_pref, label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">population mean</span><span style="color:#e6db74">&#34;</span>, lw<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>, c<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">k</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>axvline(sample[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>mean(), label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sample mean</span><span style="color:#e6db74">&#34;</span>, lw<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>, ls<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">--</span><span style="color:#e6db74">&#34;</span>, c<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">k</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>legend();
+</code></pre></div><p><img src="output_106_0.png" alt="png"></p>
 <p>You can see that the posterior mean is much closer to the true mean - so MRP definitely helps!</p>
-
 <h1 id="estimates-for-states">Estimates for states</h1>
-
 <p>The nice thing about having a model is that we can use it to answer all sorts of different questions. For example, we can repeat the analysis we just did and estimate per-state means. We&rsquo;re still computing the design matrix, logits etc as before but we&rsquo;re constraining ourselves to one state at a time. For each state, we&rsquo;ll compute the model&rsquo;s mean and standard deviations, together with the true mean and the sample mean:</p>
-
-<pre><code class="language-python">state_data = namedtuple(
-    &quot;state_data&quot;,
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">state_data <span style="color:#f92672">=</span> namedtuple(
+    <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state_data</span><span style="color:#e6db74">&#34;</span>,
     [
-        &quot;state&quot;,
-        &quot;model_state_sd&quot;,
-        &quot;model_state_pref&quot;,
-        &quot;sample_state_pref&quot;,
-        &quot;true_state_pref&quot;,
-        &quot;N&quot;,
+        <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>,
+        <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">model_state_sd</span><span style="color:#e6db74">&#34;</span>,
+        <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">model_state_pref</span><span style="color:#e6db74">&#34;</span>,
+        <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sample_state_pref</span><span style="color:#e6db74">&#34;</span>,
+        <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">true_state_pref</span><span style="color:#e6db74">&#34;</span>,
+        <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>,
     ],
 )
-states_data = []
+states_data <span style="color:#f92672">=</span> []
 
-for i in range(50):
-    state_features = np.squeeze(post_features[:, np.where(poststrat.state == i)])
-    state_poststrat = poststrat.query(f&quot;state=={i}&quot;)
-    logits = (
-        intercept[..., tf.newaxis]
-        + coeffs @ tf.cast(state_features, tf.float32)
-        + tf.gather(
-            trace[7],
-            tf.cast(state_poststrat.query(f&quot;state=={i}&quot;)[&quot;age&quot;], tf.int32),
-            axis=-1,
+<span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(<span style="color:#ae81ff">50</span>):
+    state_features <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>squeeze(post_features[:, np<span style="color:#f92672">.</span>where(poststrat<span style="color:#f92672">.</span>state <span style="color:#f92672">==</span> i)])
+    state_poststrat <span style="color:#f92672">=</span> poststrat<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)
+    logits <span style="color:#f92672">=</span> (
+        intercept[<span style="color:#f92672">.</span><span style="color:#f92672">.</span><span style="color:#f92672">.</span>, tf<span style="color:#f92672">.</span>newaxis]
+        <span style="color:#f92672">+</span> coeffs <span style="color:#960050;background-color:#1e0010">@</span> tf<span style="color:#f92672">.</span>cast(state_features, tf<span style="color:#f92672">.</span>float32)
+        <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(
+            trace[<span style="color:#ae81ff">7</span>],
+            tf<span style="color:#f92672">.</span>cast(state_poststrat<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">age</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32),
+            axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>,
         )
-        + tf.gather(
+        <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(
             coef_income,
-            tf.cast(state_poststrat.query(f&quot;state=={i}&quot;)[&quot;income&quot;], tf.int32),
-            axis=-1,
+            tf<span style="color:#f92672">.</span>cast(state_poststrat<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">income</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32),
+            axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>,
         )
-        + tf.gather(
+        <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(
             coef_eth,
-            tf.cast(state_poststrat.query(f&quot;state=={i}&quot;)[&quot;eth&quot;], tf.int32),
-            axis=-1,
+            tf<span style="color:#f92672">.</span>cast(state_poststrat<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">eth</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32),
+            axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>,
         )
-        + tf.gather(
+        <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(
             coef_state,
-            tf.cast(state_poststrat.query(f&quot;state=={i}&quot;)[&quot;state&quot;], tf.int32),
-            axis=-1,
+            tf<span style="color:#f92672">.</span>cast(state_poststrat<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state</span><span style="color:#e6db74">&#34;</span>], tf<span style="color:#f92672">.</span>int32),
+            axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>,
         )
     )
-    posterior_prob = inv_logit(logits)
-    posterior_prob = posterior_prob.reshape(-1, state_features.shape[1])
-    state_poststrat_prob = (
+    posterior_prob <span style="color:#f92672">=</span> inv_logit(logits)
+    posterior_prob <span style="color:#f92672">=</span> posterior_prob<span style="color:#f92672">.</span>reshape(<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>, state_features<span style="color:#f92672">.</span>shape[<span style="color:#ae81ff">1</span>])
+    state_poststrat_prob <span style="color:#f92672">=</span> (
         posterior_prob
-        @ state_poststrat.query(f&quot;state=={i}&quot;)[&quot;N&quot;][:, None]
-        / state_poststrat[&quot;N&quot;].sum()
+        <span style="color:#960050;background-color:#1e0010">@</span> state_poststrat<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>][:, None]
+        <span style="color:#f92672">/</span> state_poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>sum()
     )
-    states_data.append(
+    states_data<span style="color:#f92672">.</span>append(
         state_data(
             i,
-            state_poststrat_prob.std(),
-            state_poststrat_prob.mean(),
-            sample.query(f&quot;state=={i}&quot;)[&quot;cat_pref&quot;].mean(),
-            np.sum(true_pop.query(f&quot;state=={i}&quot;)[&quot;cat_pref&quot;] * state_poststrat[&quot;N&quot;])
-            / np.sum(state_poststrat[&quot;N&quot;]),
-            sample.query(f&quot;state=={i}&quot;).shape[0],
+            state_poststrat_prob<span style="color:#f92672">.</span>std(),
+            state_poststrat_prob<span style="color:#f92672">.</span>mean(),
+            sample<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>]<span style="color:#f92672">.</span>mean(),
+            np<span style="color:#f92672">.</span>sum(true_pop<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">cat_pref</span><span style="color:#e6db74">&#34;</span>] <span style="color:#f92672">*</span> state_poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>])
+            <span style="color:#f92672">/</span> np<span style="color:#f92672">.</span>sum(state_poststrat[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>]),
+            sample<span style="color:#f92672">.</span>query(f<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">state=={i}</span><span style="color:#e6db74">&#34;</span>)<span style="color:#f92672">.</span>shape[<span style="color:#ae81ff">0</span>],
         )
     )
-</code></pre>
-
-<pre><code class="language-python">state_df = pd.DataFrame(states_data)
-state_df.head()
-</code></pre>
-
-<table>
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">state_df <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>DataFrame(states_data)
+state_df<span style="color:#f92672">.</span>head()
+</code></pre></div><table>
 <thead>
 <tr>
 <th align="right"></th>
@@ -1782,7 +1552,6 @@ state_df.head()
 <th align="right">N</th>
 </tr>
 </thead>
-
 <tbody>
 <tr>
 <td align="right">0</td>
@@ -1793,7 +1562,6 @@ state_df.head()
 <td align="right">0.596565</td>
 <td align="right">12</td>
 </tr>
-
 <tr>
 <td align="right">1</td>
 <td align="right">1</td>
@@ -1803,7 +1571,6 @@ state_df.head()
 <td align="right">0.658961</td>
 <td align="right">20</td>
 </tr>
-
 <tr>
 <td align="right">2</td>
 <td align="right">2</td>
@@ -1813,7 +1580,6 @@ state_df.head()
 <td align="right">0.69817</td>
 <td align="right">34</td>
 </tr>
-
 <tr>
 <td align="right">3</td>
 <td align="right">3</td>
@@ -1823,7 +1589,6 @@ state_df.head()
 <td align="right">0.553341</td>
 <td align="right">5</td>
 </tr>
-
 <tr>
 <td align="right">4</td>
 <td align="right">4</td>
@@ -1835,52 +1600,39 @@ state_df.head()
 </tr>
 </tbody>
 </table>
-
 <p>Graphically, this is how this looks like:</p>
-
-<pre><code class="language-python">f, ax = plt.subplots(figsize=(6, 6))
-state_df.plot(
-    x=&quot;true_state_pref&quot;,
-    y=&quot;model_state_pref&quot;,
-    yerr=&quot;model_state_sd&quot;,
-    ax=ax,
-    kind=&quot;scatter&quot;,
-    label=&quot;Model&quot;,
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">f, ax <span style="color:#f92672">=</span> plt<span style="color:#f92672">.</span>subplots(figsize<span style="color:#f92672">=</span>(<span style="color:#ae81ff">6</span>, <span style="color:#ae81ff">6</span>))
+state_df<span style="color:#f92672">.</span>plot(
+    x<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">true_state_pref</span><span style="color:#e6db74">&#34;</span>,
+    y<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">model_state_pref</span><span style="color:#e6db74">&#34;</span>,
+    yerr<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">model_state_sd</span><span style="color:#e6db74">&#34;</span>,
+    ax<span style="color:#f92672">=</span>ax,
+    kind<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">scatter</span><span style="color:#e6db74">&#34;</span>,
+    label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Model</span><span style="color:#e6db74">&#34;</span>,
 )
-state_df.plot(
-    x=&quot;true_state_pref&quot;,
-    y=&quot;sample_state_pref&quot;,
-    ax=ax,
-    kind=&quot;scatter&quot;,
-    c=&quot;C1&quot;,
-    label=&quot;Sample&quot;,
+state_df<span style="color:#f92672">.</span>plot(
+    x<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">true_state_pref</span><span style="color:#e6db74">&#34;</span>,
+    y<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">sample_state_pref</span><span style="color:#e6db74">&#34;</span>,
+    ax<span style="color:#f92672">=</span>ax,
+    kind<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">scatter</span><span style="color:#e6db74">&#34;</span>,
+    c<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">C1</span><span style="color:#e6db74">&#34;</span>,
+    label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Sample</span><span style="color:#e6db74">&#34;</span>,
 )
-ax.plot([0, 1], [0, 1], c=&quot;k&quot;)
-f.tight_layout()
-plt.ylabel(&quot;Cat preference&quot;);
-</code></pre>
-
-<p><img src="output_113_1.png" alt="png" /></p>
-
+ax<span style="color:#f92672">.</span>plot([<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">1</span>], [<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">1</span>], c<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">k</span><span style="color:#e6db74">&#34;</span>)
+f<span style="color:#f92672">.</span>tight_layout()
+plt<span style="color:#f92672">.</span>ylabel(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Cat preference</span><span style="color:#e6db74">&#34;</span>);
+</code></pre></div><p><img src="output_113_1.png" alt="png"></p>
 <p>We can see that the model predictions of state-wise preferences (blue dots) are closer to the identity line compared to the orange dots (sample per-state mean preferences).</p>
-
 <p>Another interesting thing to see is how the model uncertainty (quantified by the standard deviation of the model predictions, per state) is related to sample size; we can see that the model is more confident (lower std) for states with higher N, which is what we would expect:</p>
-
-<pre><code class="language-python">plt.scatter(state_df[&quot;N&quot;], state_df[&quot;model_state_sd&quot;])
-</code></pre>
-
-<p><img src="output_116_1.png" alt="png" /></p>
-
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">plt<span style="color:#f92672">.</span>scatter(state_df[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">N</span><span style="color:#e6db74">&#34;</span>], state_df[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">model_state_sd</span><span style="color:#e6db74">&#34;</span>])
+</code></pre></div><p><img src="output_116_1.png" alt="png"></p>
 <h1 id="summary-and-further-reading">Summary and further reading</h1>
-
 <p>This post was a code-oriented introduction to MRP, which is a very interesting technique that nicely leverages the built in advantages of multilevel models. We&rsquo;ve also seen how taking a package&rsquo;s priors for granted is not always a good idea, and how prior predictive checks can help us calibrate our priors and our beliefs.</p>
-
 <p>In case you want to learn more, other than Lauren and Jonah&rsquo;s vignette, these are all excellent reads:</p>
-
 <ul>
-<li>Austin Rochford&rsquo;s <a href="https://austinrochford.com/posts/2017-07-09-mrpymc3.html" target="_blank">MRPyMC3</a> tutorial</li>
-<li>Andrew Gelman&rsquo;s post about Mister P&rsquo;s <a href="https://statmodeling.stat.columbia.edu/2013/10/09/mister-p-whats-its-secret-sauce/" target="_blank">secret sauce</a>. Somewhat more technical and perhaps more political-science specific, but still interesting and relevant.</li>
-<li>Dan Simpson&rsquo;s post on <a href="https://statmodeling.stat.columbia.edu/2019/08/22/multilevel-structured-regression-and-post-stratification/" target="_blank">structured priors</a> for MRP; this is somewhat more advanced, but Dan&rsquo;s posts are always fun to read.</li>
+<li>Austin Rochford&rsquo;s <a href="https://austinrochford.com/posts/2017-07-09-mrpymc3.html">MRPyMC3</a> tutorial</li>
+<li>Andrew Gelman&rsquo;s post about Mister P&rsquo;s <a href="https://statmodeling.stat.columbia.edu/2013/10/09/mister-p-whats-its-secret-sauce/">secret sauce</a>. Somewhat more technical and perhaps more political-science specific, but still interesting and relevant.</li>
+<li>Dan Simpson&rsquo;s post on <a href="https://statmodeling.stat.columbia.edu/2019/08/22/multilevel-structured-regression-and-post-stratification/">structured priors</a> for MRP; this is somewhat more advanced, but Dan&rsquo;s posts are always fun to read.</li>
 </ul>
 
     </div>

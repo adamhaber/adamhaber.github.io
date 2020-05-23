@@ -490,110 +490,81 @@ Intro Hierarchical models allow us to account for variations between different g
   <div class="article-container">
 
     <div class="article-style">
-      
-
-<h4 id="tl-dr">TL;DR</h4>
-
+      <h4 id="tldr">TL;DR</h4>
 <p>Covariance matrices allow us to capture parameter correlations in multivariate hierarchical models; sampling these using Hamiltonian Monte Carlo in Tensorflow Probability can be tricky and confusing; this post is about some of the math involved and how to get this right.</p>
-
 <h1 id="intro">Intro</h1>
-
-<p>Hierarchical models allow us to account for variations between different groups in our data. Let&rsquo;s say that, for some reason, we have <a href="https://adamhaber.github.io/2019/07/08/A-Tutorial-on-Varying-Intercepts-Models-with-TensorFlow-Probability.html" target="_blank">different groups of tadpoles</a> in different tanks and we want to model per-tank survival rates. Varying intercepts models allow us to fit different models to different tanks, while pooling together information <em>between</em> tanks. The tanks are somewhat different (they&rsquo;re not the same tank), so we allow their parameters to vary; but they&rsquo;re also similar (they&rsquo;re all tanks with tadpoles, not oranges or ships), so we can do some &ldquo;transfer learning&rdquo; between tanks.</p>
-
+<p>Hierarchical models allow us to account for variations between different groups in our data. Let&rsquo;s say that, for some reason, we have <a href="https://adamhaber.github.io/2019/07/08/A-Tutorial-on-Varying-Intercepts-Models-with-TensorFlow-Probability.html">different groups of tadpoles</a> in different tanks and we want to model per-tank survival rates. Varying intercepts models allow us to fit different models to different tanks, while pooling together information <em>between</em> tanks. The tanks are somewhat different (they&rsquo;re not the same tank), so we allow their parameters to vary; but they&rsquo;re also similar (they&rsquo;re all tanks with tadpoles, not oranges or ships), so we can do some &ldquo;transfer learning&rdquo; between tanks.</p>
 <p>Varying <em>intercepts</em> are already very powerful models. However, in many (most?) situations, the models we fit have more than just an intercept. Let&rsquo;s say we have 3 groups in our data, and we want to fit a simple linear model for each group, but also to share information between groups. Each model has two parameters (a slope and an intercept), and we allow these to <em>vary</em>. We can also allow them to <em>covary</em>. For example, if higher slopes usually go with lower intercepts, we want to know that, and use that to improve our estimation of both.</p>
-
 <p>To capture this covariance amongst parameters, we&rsquo;re going to need a covariance matrix.</p>
-
 <h1 id="the-lkj-prior">The LKJ prior</h1>
-
 <p>Every 2x2 covariance matrix can be decomposed as a product of a diagonal matrix of standard deviations $\sigma_\alpha,\sigma_\beta$ with a correlation matrix $\Sigma$, in the following form (same holds for higher dimensions):</p>
-
 <p>$$\mathbb{S} = \left(\begin{smallmatrix} \sigma_\alpha &amp; 0 \\\ 0 &amp; \sigma_\beta \end{smallmatrix}\right) \cdot \Sigma \cdot \left(\begin{smallmatrix} \sigma_\alpha &amp; 0 \\\ 0 &amp; \sigma_\beta \end{smallmatrix}\right)$$</p>
-
 <p>The decomposition is conceptually useful - it&rsquo;s usually easier to think about the variances (which are single-parameter properties, and depend on things like unit of measurement and typical scale) separately from the correlation structure (a pairwise property). Technically, putting a prior on the variances isn&rsquo;t very hard - we just need to make sure the variables are non-negative.</p>
+<p>A priori, it&rsquo;s not obvious how to put a prior on correlation matrices. We can&rsquo;t sample each matrix element by itself; correlation matrices have to be postitive definite, so their elements are somewhat &ldquo;entangled&rdquo; - the value in the $\left[i,j\right]$-th entry effects the element in the $\left[k,l\right]$-th entry. Luckily for us, in 2009, Lewandowski, Kurowicka, and Joe <a href="https://www.sciencedirect.com/science/article/pii/S0047259X09000876">published</a> a method for generating random correlation matrices, aptly referred to as the LKJ distribution. Like other probablistic programming languages, TFP implements the LKJ distribution. It&rsquo;s a distribution that gets two numbers as inputs - $N$, the dimension of the correlation matrix, and $\eta$, a concentration parameter that controls how plausible are large correlations; Larger $\eta$ mean correlations are more concentrated around zero <sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup>.</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#75715e"># the necessary imports</span>
+<span style="color:#f92672">import</span> tensorflow <span style="color:#f92672">as</span> tf
+<span style="color:#f92672">import</span> tensorflow_probability <span style="color:#f92672">as</span> tfp
+<span style="color:#f92672">import</span> pandas <span style="color:#f92672">as</span> pd
+<span style="color:#f92672">import</span> seaborn <span style="color:#f92672">as</span> sns
+<span style="color:#f92672">import</span> matplotlib.pyplot <span style="color:#f92672">as</span> plt 
+<span style="color:#f92672">import</span> numpy <span style="color:#f92672">as</span> np
+<span style="color:#f92672">from</span> matplotlib.patches <span style="color:#f92672">import</span> Ellipse
+<span style="color:#f92672">from</span> tensorflow_probability <span style="color:#f92672">import</span> distributions <span style="color:#66d9ef">as</span> tfd
+<span style="color:#f92672">from</span> tensorflow_probability <span style="color:#f92672">import</span> bijectors <span style="color:#66d9ef">as</span> tfb
+tf<span style="color:#f92672">.</span>compat<span style="color:#f92672">.</span>v1<span style="color:#f92672">.</span>enable_eager_execution()
 
-<p>A priori, it&rsquo;s not obvious how to put a prior on correlation matrices. We can&rsquo;t sample each matrix element by itself; correlation matrices have to be postitive definite, so their elements are somewhat &ldquo;entangled&rdquo; - the value in the $\left[i,j\right]$-th entry effects the element in the $\left[k,l\right]$-th entry. Luckily for us, in 2009, Lewandowski, Kurowicka, and Joe <a href="https://www.sciencedirect.com/science/article/pii/S0047259X09000876" target="_blank">published</a> a method for generating random correlation matrices, aptly referred to as the LKJ distribution. Like other probablistic programming languages, TFP implements the LKJ distribution. It&rsquo;s a distribution that gets two numbers as inputs - $N$, the dimension of the correlation matrix, and $\eta$, a concentration parameter that controls how plausible are large correlations; Larger $\eta$ mean correlations are more concentrated around zero <sup class="footnote-ref" id="fnref:1"><a href="#fn:1">1</a></sup>.</p>
+<span style="color:#75715e"># for plotting</span>
+sns<span style="color:#f92672">.</span>set_palette(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">muted</span><span style="color:#e6db74">&#34;</span>)
 
-<pre><code class="language-python"># the necessary imports
-import tensorflow as tf
-import tensorflow_probability as tfp
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt 
-import numpy as np
-from matplotlib.patches import Ellipse
-from tensorflow_probability import distributions as tfd
-from tensorflow_probability import bijectors as tfb
-tf.compat.v1.enable_eager_execution()
-
-# for plotting
-sns.set_palette(&quot;muted&quot;)
-
-# for reproducibility
-np.random.seed(324)
-tf.random.set_random_seed(234)
-</code></pre>
-
-<p>Here&rsquo;s how samples from different LKJ distributions look like. We sample 500 correltion matrices with $\eta=1$ and 500 matrices with $\eta=50$:</p>
-
-<pre><code class="language-python">plt.hist(tfd.LKJ(5,1).sample(500).numpy().flatten(), bins=np.linspace(-0.99,0.99), density=True, label=&quot;$\eta=1$&quot;)
-plt.hist(tfd.LKJ(5,50).sample(500).numpy().flatten(), bins=np.linspace(-0.99,0.99), density=True, label=&quot;$\eta=50$&quot;)
-plt.xlabel(&quot;Correlation values&quot;)
-plt.title(&quot;500 5x5 correlation matrices&quot;)
-plt.legend()
-</code></pre>
-
-<p><img src="1.png" alt="png" /></p>
-
-<h2 id="problem-1-falling-off-the-manifold">Problem #1 - falling off the manifold</h2>
-
+<span style="color:#75715e"># for reproducibility</span>
+np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>seed(<span style="color:#ae81ff">324</span>)
+tf<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>set_random_seed(<span style="color:#ae81ff">234</span>)
+</code></pre></div><p>Here&rsquo;s how samples from different LKJ distributions look like. We sample 500 correltion matrices with $\eta=1$ and 500 matrices with $\eta=50$:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">plt<span style="color:#f92672">.</span>hist(tfd<span style="color:#f92672">.</span>LKJ(<span style="color:#ae81ff">5</span>,<span style="color:#ae81ff">1</span>)<span style="color:#f92672">.</span>sample(<span style="color:#ae81ff">500</span>)<span style="color:#f92672">.</span>numpy()<span style="color:#f92672">.</span>flatten(), bins<span style="color:#f92672">=</span>np<span style="color:#f92672">.</span>linspace(<span style="color:#f92672">-</span><span style="color:#ae81ff">0.99</span>,<span style="color:#ae81ff">0.99</span>), density<span style="color:#f92672">=</span>True, label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">$</span><span style="color:#e6db74">\</span><span style="color:#e6db74">eta=1$</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>hist(tfd<span style="color:#f92672">.</span>LKJ(<span style="color:#ae81ff">5</span>,<span style="color:#ae81ff">50</span>)<span style="color:#f92672">.</span>sample(<span style="color:#ae81ff">500</span>)<span style="color:#f92672">.</span>numpy()<span style="color:#f92672">.</span>flatten(), bins<span style="color:#f92672">=</span>np<span style="color:#f92672">.</span>linspace(<span style="color:#f92672">-</span><span style="color:#ae81ff">0.99</span>,<span style="color:#ae81ff">0.99</span>), density<span style="color:#f92672">=</span>True, label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">$</span><span style="color:#e6db74">\</span><span style="color:#e6db74">eta=50$</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>xlabel(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Correlation values</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>title(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">500 5x5 correlation matrices</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>legend()
+</code></pre></div><p><img src="1.png" alt="png"></p>
+<h2 id="problem-1---falling-off-the-manifold">Problem #1 - falling off the manifold</h2>
 <p>So far so good - sampling correlation matrices seems straightforward. The problem starts when we want to use a Hamiltonian Monte Carlo (and we usually want to use Hamiltonian Monte Carlo) to sample from some larger model that contains an LKJ distribution. HMC allows us to generate samples from arbitrary joint distributions, not only from distributions for which we have explicit sampling methods. Here&rsquo;s a toy example to illustrate the problem. The model is simply a single LKJ distribution within a <code>JointDistributionSequential</code> object:</p>
-
-<pre><code class="language-python">model =  tfd.JointDistributionSequential(
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">model <span style="color:#f92672">=</span>  tfd<span style="color:#f92672">.</span>JointDistributionSequential(
     [
-        tfd.LKJ(2,2),
+        tfd<span style="color:#f92672">.</span>LKJ(<span style="color:#ae81ff">2</span>,<span style="color:#ae81ff">2</span>),
     ]
 )
-model.sample()
-</code></pre>
-
-<pre><code>[&lt;tf.Tensor: id=7897612, shape=(2, 2), dtype=float32, numpy=
+model<span style="color:#f92672">.</span>sample()
+</code></pre></div><pre><code>[&lt;tf.Tensor: id=7897612, shape=(2, 2), dtype=float32, numpy=
  array([[ 1.        , -0.43337458],
         [-0.43337458,  1.        ]], dtype=float32)&gt;]
 </code></pre>
-
-<p><code>model.sample()</code> seems to work, so that&rsquo;s encouraging. However, when we try to &ldquo;naively&rdquo; use an HMC sampler to generate samples from the model, things go wrong. We add a small helper function to avoid rewriting all the kernels everytime; see the <a href="https://adamhaber.github.io/2019/07/08/A-Tutorial-on-Varying-Intercepts-Models-with-TensorFlow-Probability.html" target="_blank">previous post</a> for explanations about the different function calls here.</p>
-
-<pre><code class="language-python">def sampleHMC(log_prob, inits, bijectors_list = None):
-    inner_kernel=tfp.mcmc.HamiltonianMonteCarlo(
-        target_log_prob_fn=log_prob,
-        step_size=0.1,
-        num_leapfrog_steps=3
+<p><code>model.sample()</code> seems to work, so that&rsquo;s encouraging. However, when we try to &ldquo;naively&rdquo; use an HMC sampler to generate samples from the model, things go wrong. We add a small helper function to avoid rewriting all the kernels everytime; see the <a href="https://adamhaber.github.io/2019/07/08/A-Tutorial-on-Varying-Intercepts-Models-with-TensorFlow-Probability.html">previous post</a> for explanations about the different function calls here.</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">sampleHMC</span>(log_prob, inits, bijectors_list <span style="color:#f92672">=</span> None):
+    inner_kernel<span style="color:#f92672">=</span>tfp<span style="color:#f92672">.</span>mcmc<span style="color:#f92672">.</span>HamiltonianMonteCarlo(
+        target_log_prob_fn<span style="color:#f92672">=</span>log_prob,
+        step_size<span style="color:#f92672">=</span><span style="color:#ae81ff">0.1</span>,
+        num_leapfrog_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>
     )
-    if bijectors_list is not None:
-        inner_kernel = tfp.mcmc.TransformedTransitionKernel(inner_kernel, bijectors_list)
+    <span style="color:#66d9ef">if</span> bijectors_list <span style="color:#f92672">is</span> <span style="color:#f92672">not</span> None:
+        inner_kernel <span style="color:#f92672">=</span> tfp<span style="color:#f92672">.</span>mcmc<span style="color:#f92672">.</span>TransformedTransitionKernel(inner_kernel, bijectors_list)
         
-    adaptive_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
-        inner_kernel=inner_kernel,
-        num_adaptation_steps=400
+    adaptive_kernel <span style="color:#f92672">=</span> tfp<span style="color:#f92672">.</span>mcmc<span style="color:#f92672">.</span>SimpleStepSizeAdaptation(
+        inner_kernel<span style="color:#f92672">=</span>inner_kernel,
+        num_adaptation_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">400</span>
     )
-    return tfp.mcmc.sample_chain(
-        num_results=500,
-        current_state=inits,
-        kernel=adaptive_kernel,
-        num_burnin_steps=500,
-        trace_fn=None
+    <span style="color:#66d9ef">return</span> tfp<span style="color:#f92672">.</span>mcmc<span style="color:#f92672">.</span>sample_chain(
+        num_results<span style="color:#f92672">=</span><span style="color:#ae81ff">500</span>,
+        current_state<span style="color:#f92672">=</span>inits,
+        kernel<span style="color:#f92672">=</span>adaptive_kernel,
+        num_burnin_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">500</span>,
+        trace_fn<span style="color:#f92672">=</span>None
     )
-</code></pre>
-
-<pre><code class="language-python">lkj_samps = sampleHMC(
-    log_prob=lambda lkj: model.log_prob([lkj]),
-    inits=model.sample()
-)[0]
-lkj_samps[:3]  # we print the first 3 samples 
-</code></pre>
-
-<pre><code>&lt;tf.Tensor: id=8349304, shape=(3, 2, 2), dtype=float32, numpy=
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">lkj_samps <span style="color:#f92672">=</span> sampleHMC(
+    log_prob<span style="color:#f92672">=</span><span style="color:#66d9ef">lambda</span> lkj: model<span style="color:#f92672">.</span>log_prob([lkj]),
+    inits<span style="color:#f92672">=</span>model<span style="color:#f92672">.</span>sample()
+)[<span style="color:#ae81ff">0</span>]
+lkj_samps[:<span style="color:#ae81ff">3</span>]  <span style="color:#75715e"># we print the first 3 samples </span>
+</code></pre></div><pre><code>&lt;tf.Tensor: id=8349304, shape=(3, 2, 2), dtype=float32, numpy=
 array([[[ 28.062887,  81.77511 ],
         [-80.5103  , -68.75983 ]],
 
@@ -603,18 +574,14 @@ array([[[ 28.062887,  81.77511 ],
        [[104.11292 ,  85.66264 ],
         [-83.73789 , -60.2727  ]]], dtype=float32)&gt;
 </code></pre>
-
-<p>Here we can already see the problem; these aren&rsquo;t correlation matrices by any means. What&rsquo;s happening here is that HMC, which operates in an unconstrained space of real numbers, &ldquo;falls off&rdquo; the correlation matrices manifold. The solution for this is what&rsquo;s called a <strong>bijector</strong>. Without getting into the gory mathematical details <sup class="footnote-ref" id="fnref:2"><a href="#fn:2">2</a></sup>, a bijector can be thought of as a differentiable one-to-one mapping between the unconstrained space in which the HMC trajectories live, and the constrained manifold. HMC produces samples in the unconstrained space, and the appropriate bijector spits out a valid correlation matrix. For us, this bijector is <code>tfb.CorrelationCholesky()</code>. Note that we need to pass a list of bijectors to the <code>TransformedTransitionKernel</code> constructor; in this case, we&rsquo;re passing just a single bijector:</p>
-
-<pre><code class="language-python">bij_lkj_samps = sampleHMC(
-    log_prob=lambda lkj: model.log_prob([lkj]),
-    inits=model.sample(),
-    bijectors_list=[tfb.CorrelationCholesky()]
-)[0]
-bij_lkj_samps[:3]
-</code></pre>
-
-<pre><code>&lt;tf.Tensor: id=9873388, shape=(3, 2, 2), dtype=float32, numpy=
+<p>Here we can already see the problem; these aren&rsquo;t correlation matrices by any means. What&rsquo;s happening here is that HMC, which operates in an unconstrained space of real numbers, &ldquo;falls off&rdquo; the correlation matrices manifold. The solution for this is what&rsquo;s called a <strong>bijector</strong>. Without getting into the gory mathematical details <sup id="fnref:2"><a href="#fn:2" class="footnote-ref" role="doc-noteref">2</a></sup>, a bijector can be thought of as a differentiable one-to-one mapping between the unconstrained space in which the HMC trajectories live, and the constrained manifold. HMC produces samples in the unconstrained space, and the appropriate bijector spits out a valid correlation matrix. For us, this bijector is <code>tfb.CorrelationCholesky()</code>. Note that we need to pass a list of bijectors to the <code>TransformedTransitionKernel</code> constructor; in this case, we&rsquo;re passing just a single bijector:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">bij_lkj_samps <span style="color:#f92672">=</span> sampleHMC(
+    log_prob<span style="color:#f92672">=</span><span style="color:#66d9ef">lambda</span> lkj: model<span style="color:#f92672">.</span>log_prob([lkj]),
+    inits<span style="color:#f92672">=</span>model<span style="color:#f92672">.</span>sample(),
+    bijectors_list<span style="color:#f92672">=</span>[tfb<span style="color:#f92672">.</span>CorrelationCholesky()]
+)[<span style="color:#ae81ff">0</span>]
+bij_lkj_samps[:<span style="color:#ae81ff">3</span>]
+</code></pre></div><pre><code>&lt;tf.Tensor: id=9873388, shape=(3, 2, 2), dtype=float32, numpy=
 array([[[ 1.        ,  0.        ],
         [-0.43139905,  0.90216124]],
 
@@ -624,59 +591,36 @@ array([[[ 1.        ,  0.        ],
        [[ 1.        ,  0.        ],
         [-0.43139905,  0.90216124]]], dtype=float32)&gt;
 </code></pre>
-
 <p>At first glance, these don&rsquo;t look like correlation matrices either; that&rsquo;s because they&rsquo;re the <em>Cholesky factors</em> of kosher correlation matrices.</p>
-
-<h2 id="overthinking-box-cholesky-factors-3">Overthinking box - Cholesky factors <sup class="footnote-ref" id="fnref:3"><a href="#fn:3">3</a></sup></h2>
-
+<h2 id="overthinking-box---cholesky-factors-3">Overthinking box - Cholesky factors <sup id="fnref:3"><a href="#fn:3" class="footnote-ref" role="doc-noteref">3</a></sup></h2>
 <p>Every correlation matrix $\Sigma$ can be decomposed as a product of a lower triangular matrix $L$ and its transpose $L^T$. More formally, a lower triangular matrix $L$ is the Cholesky factor of some correlation matrix $\Sigma$ if and only if its diagonal elements are strictly positive and each of its rows has unit norm.</p>
-
 <p>Cholesky factors come up in many different places in statistics, machine learning, metric learning, computational linear algebra, etc. In the context of Monte Carlo simulations, Cholesky factors are used to generate correlated quantities (which we often want) from uncorrelated samples (which are easy to generate in the computer): If $z$ is a matrix of uncorrelated normally distributed numbers, and $L$ is the Cholesky factor of some correlation matrix $\Sigma$, then $Lz$ would have the correlation structure described by $\Sigma$.</p>
-
 <p>Here&rsquo;s a simple demonstration. We generate 1000 samples from a bivariate guassian with zero mean, unit variance and no correlation:</p>
-
-<pre><code class="language-python">z = tf.transpose(tfd.MultivariateNormalDiag(loc=[0,0], scale_diag=[1,1]).sample(1000))
-</code></pre>
-
-<p>We now define a correlation matrix between two variables with correlation -0.85. We compute its Cholesky factor, multiply it with the original (uncorrelated) data, and voila:</p>
-
-<pre><code class="language-python">M = tf.constant([[1,-0.85],[-0.85,1]])
-L = tf.cholesky(M)
-Lz = L@z
-</code></pre>
-
-<pre><code class="language-python">plt.scatter(z[0], z[1], label=&quot;$z$&quot;)
-plt.scatter(Lz[0], Lz[1], label=&quot;$Lz$&quot;)
-plt.legend(loc='upper right')
-</code></pre>
-
-<p><img src="2.png" alt="png" /></p>
-
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">z <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>transpose(tfd<span style="color:#f92672">.</span>MultivariateNormalDiag(loc<span style="color:#f92672">=</span>[<span style="color:#ae81ff">0</span>,<span style="color:#ae81ff">0</span>], scale_diag<span style="color:#f92672">=</span>[<span style="color:#ae81ff">1</span>,<span style="color:#ae81ff">1</span>])<span style="color:#f92672">.</span>sample(<span style="color:#ae81ff">1000</span>))
+</code></pre></div><p>We now define a correlation matrix between two variables with correlation -0.85. We compute its Cholesky factor, multiply it with the original (uncorrelated) data, and voila:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">M <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>constant([[<span style="color:#ae81ff">1</span>,<span style="color:#f92672">-</span><span style="color:#ae81ff">0.85</span>],[<span style="color:#f92672">-</span><span style="color:#ae81ff">0.85</span>,<span style="color:#ae81ff">1</span>]])
+L <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>cholesky(M)
+Lz <span style="color:#f92672">=</span> L<span style="color:#a6e22e">@z</span>
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">plt<span style="color:#f92672">.</span>scatter(z[<span style="color:#ae81ff">0</span>], z[<span style="color:#ae81ff">1</span>], label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">$z$</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>scatter(Lz[<span style="color:#ae81ff">0</span>], Lz[<span style="color:#ae81ff">1</span>], label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">$Lz$</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>legend(loc<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">upper right</span><span style="color:#e6db74">&#39;</span>)
+</code></pre></div><p><img src="2.png" alt="png"></p>
 <p>We can see that the two components of $Lz$ are negatively correlated, as expected. More quantitatively, here&rsquo;s the correlation matrix for the cholesky-tranformed data:</p>
-
-<pre><code class="language-python">tfp.stats.correlation(tf.transpose(Lz))
-</code></pre>
-
-<pre><code>&lt;tf.Tensor: id=9873636, shape=(2, 2), dtype=float32, numpy=
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">tfp<span style="color:#f92672">.</span>stats<span style="color:#f92672">.</span>correlation(tf<span style="color:#f92672">.</span>transpose(Lz))
+</code></pre></div><pre><code>&lt;tf.Tensor: id=9873636, shape=(2, 2), dtype=float32, numpy=
 array([[ 0.9999995 , -0.8532509 ],
        [-0.8532509 ,  0.99999976]], dtype=float32)&gt;
 </code></pre>
-
-<h2 id="problem-2-the-wrong-log-prob">Problem #2 - the wrong log_prob</h2>
-
+<h2 id="problem-2---the-wrong-log_prob">Problem #2 - the wrong log_prob</h2>
 <p>So the bijector solves the constrained-unconstrained problem, and HMC can run smoothly. But things are trickier than that (and the sampler won&rsquo;t tell you that). The HMC sampler works with the log probability function of the model. If we have an LKJ distribution somewhere in our model, than for every sample, HMC computes the <code>log_prob</code> of the correlation matrix according to LKJ. But LKJ is a distribution over correlation matrices, not Cholesky factors of correlation matrices, which is the output of our bijector! So we end up computing the wrong <code>log_prob</code>, which means we&rsquo;re not sampling from the model we think we&rsquo;re sampling. So what can we do?</p>
-
 <p>Solution number 1 is to make sure our cholesky-factors-of-correlation-matrices become correlation matrices before we compute their <code>log_prob</code> according to LKJ. To do so, we need two more bijectors: <code>tfb.CholeskyOuterProduct</code>, which maps $L$ to $LL^T$, and <code>tfb.Chain</code> which, surprisingly, chains (composes) the two bijectors:</p>
-
-<pre><code class="language-python">chained_bij_samps = sampleHMC(
-    lambda lkj: model.log_prob([lkj]), 
-    model.sample(), 
-    bijectors_list=[tfb.Chain([tfb.CholeskyOuterProduct(), tfb.CorrelationCholesky()])]
-)[0]
-chained_bij_samps[:3]
-</code></pre>
-
-<pre><code>&lt;tf.Tensor: id=12661134, shape=(3, 2, 2), dtype=float32, numpy=
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">chained_bij_samps <span style="color:#f92672">=</span> sampleHMC(
+    <span style="color:#66d9ef">lambda</span> lkj: model<span style="color:#f92672">.</span>log_prob([lkj]), 
+    model<span style="color:#f92672">.</span>sample(), 
+    bijectors_list<span style="color:#f92672">=</span>[tfb<span style="color:#f92672">.</span>Chain([tfb<span style="color:#f92672">.</span>CholeskyOuterProduct(), tfb<span style="color:#f92672">.</span>CorrelationCholesky()])]
+)[<span style="color:#ae81ff">0</span>]
+chained_bij_samps[:<span style="color:#ae81ff">3</span>]
+</code></pre></div><pre><code>&lt;tf.Tensor: id=12661134, shape=(3, 2, 2), dtype=float32, numpy=
 array([[[ 1.        , -0.21354356],
         [-0.21354356,  1.        ]],
 
@@ -686,31 +630,22 @@ array([[[ 1.        , -0.21354356],
        [[ 1.        ,  0.01905983],
         [ 0.01905983,  1.0000001 ]]], dtype=float32)&gt;
 </code></pre>
-
-<p>This looks good. And this time it actually is - this is doing what we think it&rsquo;s doing. But this is cumbersome, and not very readable. Even worse, when we&rsquo;ll pass these correlations matrices to a multivariate gaussian (the usual case), it&rsquo;ll compute their cholesky factors anyway (check out the <a href="https://github.com/tensorflow/probability/blob/4dd589ba945db902d28dbb75dc0a795706814d45/tensorflow_probability/python/distributions/mvn_full_covariance.py#L189" target="_blank">source code</a>, as well as the depracation warning above it). So we end up sampling cholesky factors, tranforming them back to correlation matrices just to compute their cholesky factors again&hellip;</p>
-
+<p>This looks good. And this time it actually is - this is doing what we think it&rsquo;s doing. But this is cumbersome, and not very readable. Even worse, when we&rsquo;ll pass these correlations matrices to a multivariate gaussian (the usual case), it&rsquo;ll compute their cholesky factors anyway (check out the <a href="https://github.com/tensorflow/probability/blob/4dd589ba945db902d28dbb75dc0a795706814d45/tensorflow_probability/python/distributions/mvn_full_covariance.py#L189">source code</a>, as well as the depracation warning above it). So we end up sampling cholesky factors, tranforming them back to correlation matrices just to compute their cholesky factors again&hellip;</p>
 <h2 id="enter-choleskylkj">Enter CholeskyLKJ</h2>
-
-<p>Since <code>tfp-nightly-0.9.0.dev20190830</code> (a daily-built version that contains the newest changes that have yet to made it into the latest stable release), we have a better option - the <code>CholeskyLKJ</code> distribution. Unlike LKJ, this is a distribution over <em>cholesky factors</em> of correlation matrices - so no need to go back and forth, or to chain bijectors&hellip; It&rsquo;s faster, numerically stabler, and it is by the <a href="https://mc-stan.org/docs/2_19/functions-reference/cholesky-lkj-correlation-distribution.html" target="_blank">book</a>.</p>
-
+<p>Since <code>tfp-nightly-0.9.0.dev20190830</code> (a daily-built version that contains the newest changes that have yet to made it into the latest stable release), we have a better option - the <code>CholeskyLKJ</code> distribution. Unlike LKJ, this is a distribution over <em>cholesky factors</em> of correlation matrices - so no need to go back and forth, or to chain bijectors&hellip; It&rsquo;s faster, numerically stabler, and it is by the <a href="https://mc-stan.org/docs/2_19/functions-reference/cholesky-lkj-correlation-distribution.html">book</a>.</p>
 <p>To use it, we just need a single <code>tfb.CorrelationCholesky()</code> bijector:</p>
-
-<pre><code class="language-python">model =  tfd.JointDistributionSequential(
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">model <span style="color:#f92672">=</span>  tfd<span style="color:#f92672">.</span>JointDistributionSequential(
     [
-        tfd.CholeskyLKJ(2,2),
+        tfd<span style="color:#f92672">.</span>CholeskyLKJ(<span style="color:#ae81ff">2</span>,<span style="color:#ae81ff">2</span>),
     ]
 )
-</code></pre>
-
-<pre><code class="language-python">cholesky_lkj_samps = sampleHMC(
-    lambda lkj: model.log_prob([lkj]),
-    model.sample(),
-    bijectors_list=[tfb.CorrelationCholesky()]
-)[0]
-cholesky_lkj_samps[:3]
-</code></pre>
-
-<pre><code>&lt;tf.Tensor: id=14269238, shape=(3, 2, 2), dtype=float32, numpy=
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">cholesky_lkj_samps <span style="color:#f92672">=</span> sampleHMC(
+    <span style="color:#66d9ef">lambda</span> lkj: model<span style="color:#f92672">.</span>log_prob([lkj]),
+    model<span style="color:#f92672">.</span>sample(),
+    bijectors_list<span style="color:#f92672">=</span>[tfb<span style="color:#f92672">.</span>CorrelationCholesky()]
+)[<span style="color:#ae81ff">0</span>]
+cholesky_lkj_samps[:<span style="color:#ae81ff">3</span>]
+</code></pre></div><pre><code>&lt;tf.Tensor: id=14269238, shape=(3, 2, 2), dtype=float32, numpy=
 array([[[ 1.        ,  0.        ],
         [ 0.20048861,  0.97969604]],
 
@@ -720,56 +655,42 @@ array([[[ 1.        ,  0.        ],
        [[ 1.        ,  0.        ],
         [ 0.18798688,  0.9821716 ]]], dtype=float32)&gt;
 </code></pre>
-
 <h1 id="a-simple-use-case">A simple use case</h1>
-
 <p>We&rsquo;ve covered the technicalities of sampling correlation matrices (and their Cholesky factors) with TFP. To get a more complete picture of how these are actually used, let&rsquo;s see an example. We&rsquo;re sticking with McElreath and Statistical Rethinking; this time we&rsquo;re reproducing the café waiting times example.</p>
-
 <h2 id="fake-data">Fake data</h2>
-
-<p>Unlike the tadpoles example, this time we&rsquo;re going to model fake data (aka synthetic data). This may sound strange, but it&rsquo;s actually a <em>very</em> useful skill, and it&rsquo;s considered by many to be pretty much the first step in a Bayesian data analysis workflow (see <a href="https://khakieconomics.github.io/2017/04/30/An-easy-way-to-simulate-fake-data-in-stan.html" target="_blank">here</a>). The reason is that unlike in a &ldquo;real data analysis&rdquo;, when you&rsquo;re generating fake data, you <em>know</em> the true underlying data generating process; making sure you can recover its parameters is a very important sanity check. It also helps in verifying the model is correctly specified and that the MCMC sampler does what you think it does, which is good.</p>
-
+<p>Unlike the tadpoles example, this time we&rsquo;re going to model fake data (aka synthetic data). This may sound strange, but it&rsquo;s actually a <em>very</em> useful skill, and it&rsquo;s considered by many to be pretty much the first step in a Bayesian data analysis workflow (see <a href="https://khakieconomics.github.io/2017/04/30/An-easy-way-to-simulate-fake-data-in-stan.html">here</a>). The reason is that unlike in a &ldquo;real data analysis&rdquo;, when you&rsquo;re generating fake data, you <em>know</em> the true underlying data generating process; making sure you can recover its parameters is a very important sanity check. It also helps in verifying the model is correctly specified and that the MCMC sampler does what you think it does, which is good.</p>
 <p>The data we&rsquo;re generating describes the waiting times in 20 different cafés. Each café has a different average waiting times in the morning and in the afternoon. The average morning waiting time is the intercept, and the difference between afternoon and morning average waiting times is the slope. The intercepts and slopes for each of the 20 cafés are sampled from a (surprise surprise) correlated bivariate Gaussian distribution.</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python"><span style="color:#75715e">##### Inputs needed to generate the covariance matrix between intercepts and slopes #####</span>
 
-<pre><code class="language-python">##### Inputs needed to generate the covariance matrix between intercepts and slopes #####
 
+a <span style="color:#f92672">=</span> <span style="color:#ae81ff">3.5</span>  <span style="color:#75715e"># average morning wait time</span>
+b <span style="color:#f92672">=</span> <span style="color:#f92672">-</span><span style="color:#ae81ff">1</span> <span style="color:#75715e"># average difference afternoon wait time</span>
+sigma_a <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span> <span style="color:#75715e"># standard deviation in the (café-specific) intercepts</span>
+sigma_b <span style="color:#f92672">=</span> <span style="color:#ae81ff">0.5</span> <span style="color:#75715e"># standard deviation in the (café-specific) slopes</span>
+rho <span style="color:#f92672">=</span> <span style="color:#f92672">-</span><span style="color:#ae81ff">0.7</span> <span style="color:#75715e"># correlation between intercepts and slopes</span>
 
-a = 3.5  # average morning wait time
-b = -1 # average difference afternoon wait time
-sigma_a = 1 # standard deviation in the (café-specific) intercepts
-sigma_b = 0.5 # standard deviation in the (café-specific) slopes
-rho = -0.7 # correlation between intercepts and slopes
+mu <span style="color:#f92672">=</span> [a,b] <span style="color:#75715e"># the mean of our gaussian distribution</span>
+sigmas <span style="color:#f92672">=</span> [sigma_a,sigma_b] <span style="color:#75715e"># vector of standard deviations</span>
+corr_matrix <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>array([[<span style="color:#ae81ff">1</span>,rho], [rho,<span style="color:#ae81ff">1</span>]]) <span style="color:#75715e"># correlation matrix</span>
+cov_matrix <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>diag(sigmas)<span style="color:#a6e22e">@corr_matrix</span><span style="color:#a6e22e">@np.diag</span>(sigmas)  <span style="color:#75715e"># the covariance matrix of our gaussian distribution </span>
+</code></pre></div><p>After setting the true parameters, we&rsquo;re generating 20 samples of cafés:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">n_cafés <span style="color:#f92672">=</span> <span style="color:#ae81ff">20</span> <span style="color:#75715e"># 20 cafés overall</span>
 
-mu = [a,b] # the mean of our gaussian distribution
-sigmas = [sigma_a,sigma_b] # vector of standard deviations
-corr_matrix = np.array([[1,rho], [rho,1]]) # correlation matrix
-cov_matrix = np.diag(sigmas)@corr_matrix@np.diag(sigmas)  # the covariance matrix of our gaussian distribution 
-</code></pre>
+café_params <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>multivariate_normal(mu ,cov_matrix,size<span style="color:#f92672">=</span>n_cafés) 
+café_intercept <span style="color:#f92672">=</span> café_params[:, <span style="color:#ae81ff">0</span>] <span style="color:#75715e"># intercepts are in the first column</span>
+café_slopes <span style="color:#f92672">=</span> café_params[:, <span style="color:#ae81ff">1</span>] <span style="color:#75715e"># slopes are in the second</span>
+</code></pre></div><p>And compute the actual per-café morning and afternoon waiting times, in 10 different visits. Below is a sample of 10 rows from our dataframe (which has 200 data points overall - 10 visits in 20 cafés):</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">n_visits <span style="color:#f92672">=</span> <span style="color:#ae81ff">10</span> <span style="color:#75715e"># 10 visits per café</span>
 
-<p>After setting the true parameters, we&rsquo;re generating 20 samples of cafés:</p>
+afternoon <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>tile([<span style="color:#ae81ff">0</span>,<span style="color:#ae81ff">1</span>], n_visits <span style="color:#f92672">*</span> n_cafés<span style="color:#f92672">/</span><span style="color:#f92672">/</span><span style="color:#ae81ff">2</span>) <span style="color:#75715e"># alternate values for mornings and afternoons in the data frame</span>
+café_id <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>repeat(np<span style="color:#f92672">.</span>arange(n_cafés),n_visits) <span style="color:#75715e"># data for each café are consecutive rows in the data frame</span>
 
-<pre><code class="language-python">n_cafés = 20 # 20 cafés overall
-
-café_params = np.random.multivariate_normal(mu ,cov_matrix,size=n_cafés) 
-café_intercept = café_params[:, 0] # intercepts are in the first column
-café_slopes = café_params[:, 1] # slopes are in the second
-</code></pre>
-
-<p>And compute the actual per-café morning and afternoon waiting times, in 10 different visits. Below is a sample of 10 rows from our dataframe (which has 200 data points overall - 10 visits in 20 cafés):</p>
-
-<pre><code class="language-python">n_visits = 10 # 10 visits per café
-
-afternoon = np.tile([0,1], n_visits * n_cafés//2) # alternate values for mornings and afternoons in the data frame
-café_id = np.repeat(np.arange(n_cafés),n_visits) # data for each café are consecutive rows in the data frame
-
-mu = café_intercept[café_id] + café_slopes[café_id] * afternoon # the regression equation for the mean waiting time
-sigma = 0.5 # standard deviation of waiting time within cafés
-wait = np.random.normal(mu, sigma, n_visits * n_cafés) # generate instances of waiting times
-df = pd.DataFrame(dict(café = café_id, afternoon = afternoon, wait = wait))
-print(df.sample(10).to_string(index=False))
-</code></pre>
-
-<pre><code> café  afternoon      wait
+mu <span style="color:#f92672">=</span> café_intercept[café_id] <span style="color:#f92672">+</span> café_slopes[café_id] <span style="color:#f92672">*</span> afternoon <span style="color:#75715e"># the regression equation for the mean waiting time</span>
+sigma <span style="color:#f92672">=</span> <span style="color:#ae81ff">0.5</span> <span style="color:#75715e"># standard deviation of waiting time within cafés</span>
+wait <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>normal(mu, sigma, n_visits <span style="color:#f92672">*</span> n_cafés) <span style="color:#75715e"># generate instances of waiting times</span>
+df <span style="color:#f92672">=</span> pd<span style="color:#f92672">.</span>DataFrame(dict(café <span style="color:#f92672">=</span> café_id, afternoon <span style="color:#f92672">=</span> afternoon, wait <span style="color:#f92672">=</span> wait))
+<span style="color:#66d9ef">print</span>(df<span style="color:#f92672">.</span>sample(<span style="color:#ae81ff">10</span>)<span style="color:#f92672">.</span>to_string(index<span style="color:#f92672">=</span>False))
+</code></pre></div><pre><code> café  afternoon      wait
     8          1  2.175858
     9          0  2.364313
     9          1  1.744504
@@ -781,173 +702,133 @@ print(df.sample(10).to_string(index=False))
    17          1  2.796278
    15          1  3.430852
 </code></pre>
-
 <h2 id="the-model">The model</h2>
-
 <p>We specify in math (and latex) the model described above:</p>
-
 <p>$$\begin{align}
-W_i &amp; \sim \text{Normal}(\alpha_{café[i]}+\beta_{café[i]}\cdot \text{AFTERNOON}_i,\sigma) \\<br />
-\binom{\alpha_{café}}{\beta_{café}} &amp; \sim \text{MVNormal}\left(\binom{\alpha}{\beta},\mathbb{S}\right) \\<br />
-\mathbb{S} &amp; = \left(\begin{smallmatrix} \sigma_\alpha &amp; 0 \\\ 0 &amp; \sigma_\beta \end{smallmatrix}\right) \cdot LL^T \cdot \left(\begin{smallmatrix} \sigma_\alpha &amp; 0 \\\ 0 &amp; \sigma_\beta \end{smallmatrix}\right)  \\<br />
-\alpha &amp; \sim \text{Normal}(5,2) \\<br />
-\beta &amp; \sim \text{Normal}(-1,0.5) \\<br />
-\sigma_{\alpha},\sigma_{\beta} &amp; \sim \text{Exp}(1) \\<br />
-\sigma &amp; \sim \text{Exp}(1) \\<br />
-L &amp; \sim \text{CholeskyLKJ}(2,2) \\<br />
+W_i &amp; \sim \text{Normal}(\alpha_{café[i]}+\beta_{café[i]}\cdot \text{AFTERNOON}_i,\sigma) \\\<br>
+\binom{\alpha_{café}}{\beta_{café}} &amp; \sim \text{MVNormal}\left(\binom{\alpha}{\beta},\mathbb{S}\right) \\\<br>
+\mathbb{S} &amp; = \left(\begin{smallmatrix} \sigma_\alpha &amp; 0 \\\ 0 &amp; \sigma_\beta \end{smallmatrix}\right) \cdot LL^T \cdot \left(\begin{smallmatrix} \sigma_\alpha &amp; 0 \\\ 0 &amp; \sigma_\beta \end{smallmatrix}\right)  \\\<br>
+\alpha &amp; \sim \text{Normal}(5,2) \\\<br>
+\beta &amp; \sim \text{Normal}(-1,0.5) \\\<br>
+\sigma_{\alpha},\sigma_{\beta} &amp; \sim \text{Exp}(1) \\\<br>
+\sigma &amp; \sim \text{Exp}(1) \\\<br>
+L &amp; \sim \text{CholeskyLKJ}(2,2) \\\<br>
 \end{align}$$</p>
-
-<pre><code class="language-python">model = tfd.JointDistributionSequential(
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">model <span style="color:#f92672">=</span> tfd<span style="color:#f92672">.</span>JointDistributionSequential(
     [
-        tfd.CholeskyLKJ(2,2),  # rho, the prior for the correlation matrix between intercepts and slopes
-        tfd.Sample(tfd.Exponential(rate = 1),sample_shape = 1), # sigma, prior std for the waiting time
-        tfd.Sample(tfd.Exponential(rate = 1),sample_shape = 2), # sigma_café, prior of stds for intercepts and slopes (vector of 2)
-        tfd.Sample(tfd.Normal(loc = -1, scale = 0.5), sample_shape = 1),   # b, the prior mean for the slopes
-        tfd.Sample(tfd.Normal(loc = 5, scale = 2), sample_shape = 1),   # a, the prior mean for the intercepts
-        lambda a,b,sigma_café,sigma,chol_rho : tfd.Sample( # per-café intercepts and slopes
-            tfd.MultivariateNormalTriL(
-                loc = tf.concat([a,b],axis=-1),
-                scale_tril = tf.linalg.LinearOperatorDiag(sigma_café).matmul(chol_rho)
+        tfd<span style="color:#f92672">.</span>CholeskyLKJ(<span style="color:#ae81ff">2</span>,<span style="color:#ae81ff">2</span>),  <span style="color:#75715e"># rho, the prior for the correlation matrix between intercepts and slopes</span>
+        tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Exponential(rate <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>),sample_shape <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>), <span style="color:#75715e"># sigma, prior std for the waiting time</span>
+        tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Exponential(rate <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>),sample_shape <span style="color:#f92672">=</span> <span style="color:#ae81ff">2</span>), <span style="color:#75715e"># sigma_café, prior of stds for intercepts and slopes (vector of 2)</span>
+        tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(loc <span style="color:#f92672">=</span> <span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>, scale <span style="color:#f92672">=</span> <span style="color:#ae81ff">0.5</span>), sample_shape <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>),   <span style="color:#75715e"># b, the prior mean for the slopes</span>
+        tfd<span style="color:#f92672">.</span>Sample(tfd<span style="color:#f92672">.</span>Normal(loc <span style="color:#f92672">=</span> <span style="color:#ae81ff">5</span>, scale <span style="color:#f92672">=</span> <span style="color:#ae81ff">2</span>), sample_shape <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>),   <span style="color:#75715e"># a, the prior mean for the intercepts</span>
+        <span style="color:#66d9ef">lambda</span> a,b,sigma_café,sigma,chol_rho : tfd<span style="color:#f92672">.</span>Sample( <span style="color:#75715e"># per-café intercepts and slopes</span>
+            tfd<span style="color:#f92672">.</span>MultivariateNormalTriL(
+                loc <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>concat([a,b],axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>),
+                scale_tril <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>linalg<span style="color:#f92672">.</span>LinearOperatorDiag(sigma_café)<span style="color:#f92672">.</span>matmul(chol_rho)
             ),
-            sample_shape=n_cafés
+            sample_shape<span style="color:#f92672">=</span>n_cafés
         ),
-        lambda mvn, a, b, sigma_café, sigma : tfd.Independent(  #per-café waiting times
-            tfd.Normal(
-                loc = tf.gather(mvn[:,:,0],café_id,axis=-1) + tf.gather(mvn[:,:,1],café_id,axis=-1)*afternoon,
-                scale = sigma
+        <span style="color:#66d9ef">lambda</span> mvn, a, b, sigma_café, sigma : tfd<span style="color:#f92672">.</span>Independent(  <span style="color:#75715e">#per-café waiting times</span>
+            tfd<span style="color:#f92672">.</span>Normal(
+                loc <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>gather(mvn[:,:,<span style="color:#ae81ff">0</span>],café_id,axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>) <span style="color:#f92672">+</span> tf<span style="color:#f92672">.</span>gather(mvn[:,:,<span style="color:#ae81ff">1</span>],café_id,axis<span style="color:#f92672">=</span><span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>)<span style="color:#f92672">*</span>afternoon,
+                scale <span style="color:#f92672">=</span> sigma
             ),
-            reinterpreted_batch_ndims=1
+            reinterpreted_batch_ndims<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>
         )
     ]
 )
-</code></pre>
-
-<p>Couple of non-trivial things in the model above:</p>
-
+</code></pre></div><p>Couple of non-trivial things in the model above:</p>
 <ul>
 <li><code>MultivariateNormalTriL</code>: we&rsquo;ve mentioned that a covariance matrix can be specified as $\Lambda L L^T\Lambda$ where $\Lambda$ is a diagonal matrix of standard deviations and $L$ is the cholesky factor of the correlation matrix. <code>MultivariateNormalTriL</code> is a parametrization of a multivariate normal distribution whose covariance matrix is specificied using the lower triangular matrix $\Lambda L$.</li>
 <li><code>LinearOperatorDiag</code>: this turns a <code>sigma-café</code> vector of length 2 to a 2x2 diagonal matrix; very similar to <code>tf.diag</code>, but handles all the batching semantics for us.</li>
 <li><code>tf.gather</code>: this takes each intercept (in the case of <code>mvn[:,:,0]</code>) and slope (in the case of <code>mvn[:,:,1]</code> and tiles it 10 times, so overall we get a loc vector of size 200, with which we generate 200 different waiting times, 10 per café.</li>
 </ul>
-
 <p>We now declare the <code>target_log_prob</code> function for the HMC kernel, and initial values for 4 different chains. Like before, we throw away the last sample (predicted waiting times); we want to plug the waiting times from the data into the likelihood, instead.</p>
-
-<pre><code class="language-python">n_chains = 4
-log_prob_fn = lambda rho, sigma, sigma_café, b, a, mvn : model.log_prob([rho, sigma, sigma_café, b, a, mvn ,wait])
-init_rho, init_sigma, init_sigma_café, init_b, init_a, init_mvn, _ = model.sample(n_chains)
-</code></pre>
-
-<p>These initial values are used to specify the shape of the initial values we actually pass, specified below:</p>
-
-<pre><code class="language-python">init_rho = tf.stack([tf.eye(2) for _ in range(n_chains)])
-init_sigma = tf.ones_like(init_sigma)
-init_sigma_café = tf.ones_like(init_sigma_café)
-init_b = tf.zeros_like(init_b)
-init_a = tf.zeros_like(init_a)
-init_mvn = tf.zeros_like(init_mvn)
-</code></pre>
-
-<p>We define the list of bijectors. Note that since standard deviations are non-negative, their support is constrained, and we need a bijector here, as well. The appropriate bijector in this case is <code>tfb.Exp</code>. Once we specificed a bijectors list, we need to match a bijector for any distribution in our <code>JointDistributionSequential</code> object; since the support of <code>a</code>, <code>b</code> and <code>mvn</code> is unconstrained, we simply use an identity transformation:</p>
-
-<pre><code class="language-python">bijectors_list = [
-    tfb.CorrelationCholesky(),
-    tfb.Exp(),
-    tfb.Exp(),
-    tfb.Identity(),
-    tfb.Identity(),
-    tfb.Identity(),
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">n_chains <span style="color:#f92672">=</span> <span style="color:#ae81ff">4</span>
+log_prob_fn <span style="color:#f92672">=</span> <span style="color:#66d9ef">lambda</span> rho, sigma, sigma_café, b, a, mvn : model<span style="color:#f92672">.</span>log_prob([rho, sigma, sigma_café, b, a, mvn ,wait])
+init_rho, init_sigma, init_sigma_café, init_b, init_a, init_mvn, _ <span style="color:#f92672">=</span> model<span style="color:#f92672">.</span>sample(n_chains)
+</code></pre></div><p>These initial values are used to specify the shape of the initial values we actually pass, specified below:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">init_rho <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>stack([tf<span style="color:#f92672">.</span>eye(<span style="color:#ae81ff">2</span>) <span style="color:#66d9ef">for</span> _ <span style="color:#f92672">in</span> range(n_chains)])
+init_sigma <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>ones_like(init_sigma)
+init_sigma_café <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>ones_like(init_sigma_café)
+init_b <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>zeros_like(init_b)
+init_a <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>zeros_like(init_a)
+init_mvn <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>zeros_like(init_mvn)
+</code></pre></div><p>We define the list of bijectors. Note that since standard deviations are non-negative, their support is constrained, and we need a bijector here, as well. The appropriate bijector in this case is <code>tfb.Exp</code>. Once we specificed a bijectors list, we need to match a bijector for any distribution in our <code>JointDistributionSequential</code> object; since the support of <code>a</code>, <code>b</code> and <code>mvn</code> is unconstrained, we simply use an identity transformation:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">bijectors_list <span style="color:#f92672">=</span> [
+    tfb<span style="color:#f92672">.</span>CorrelationCholesky(),
+    tfb<span style="color:#f92672">.</span>Exp(),
+    tfb<span style="color:#f92672">.</span>Exp(),
+    tfb<span style="color:#f92672">.</span>Identity(),
+    tfb<span style="color:#f92672">.</span>Identity(),
+    tfb<span style="color:#f92672">.</span>Identity(),
 ]
-</code></pre>
-
-<pre><code class="language-python">states = sampleHMC(log_prob_fn,
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">states <span style="color:#f92672">=</span> sampleHMC(log_prob_fn,
                 [init_rho, init_sigma, init_sigma_café, init_b, init_a, init_mvn],
                 bijectors_list)
-</code></pre>
-
-<pre><code class="language-python">[s.shape for s in states]
-</code></pre>
-
-<pre><code>[TensorShape([Dimension(500), Dimension(4), Dimension(2), Dimension(2)]),
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">[s<span style="color:#f92672">.</span>shape <span style="color:#66d9ef">for</span> s <span style="color:#f92672">in</span> states]
+</code></pre></div><pre><code>[TensorShape([Dimension(500), Dimension(4), Dimension(2), Dimension(2)]),
  TensorShape([Dimension(500), Dimension(4), Dimension(1)]),
  TensorShape([Dimension(500), Dimension(4), Dimension(2)]),
  TensorShape([Dimension(500), Dimension(4), Dimension(1)]),
  TensorShape([Dimension(500), Dimension(4), Dimension(1)]),
  TensorShape([Dimension(500), Dimension(4), Dimension(20), Dimension(2)])]
 </code></pre>
-
 <p>Shapes look alright. To see the posterior distribution of covariance values, we move back from Cholesky factors to correlation matrices, and multiply by the inferred sigmas (the zeroth axis is the number of samples, first is the number of the chain, so we transpose the second and third axes):</p>
-
-<pre><code class="language-python">rhos = states[0]@tf.transpose(states[0],[0,1,3,2])
-</code></pre>
-
-<p>Same as above, we create diagonal matrices from our sampled <code>sigma_alpha</code>, <code>sigma_beta</code> values:</p>
-
-<pre><code class="language-python">sigmas = states[2]
-diag_sigmas = tf.linalg.LinearOperatorDiag(sigmas)
-</code></pre>
-
-<pre><code class="language-python">inferred_covs = tf.matmul(diag_sigmas.matmul(rhos),diag_sigmas)
-</code></pre>
-
-<pre><code class="language-python">plt.figure(figsize=(9,4))
-for (row_idx,col_idx), title in zip([(0,0),(0,1),(1,1)],[&quot;$\sigma_{\\alpha}$&quot;,&quot;Covariance&quot;,&quot;$\sigma_{\\beta}$&quot;]):
-    plt.subplot(131+row_idx+col_idx)
-    sns.distplot(inferred_covs[:,:,row_idx,col_idx].numpy().flatten(), label = &quot;Posterior&quot;)
-    plt.axvline(cov_matrix[row_idx,col_idx],c='k',ls='--',label=&quot;True value&quot;)
-    plt.legend()
-    plt.title(title)
-plt.tight_layout()
-</code></pre>
-
-<p><img src="3.png" alt="png" /></p>
-
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">rhos <span style="color:#f92672">=</span> states[<span style="color:#ae81ff">0</span>]<span style="color:#a6e22e">@tf.transpose</span>(states[<span style="color:#ae81ff">0</span>],[<span style="color:#ae81ff">0</span>,<span style="color:#ae81ff">1</span>,<span style="color:#ae81ff">3</span>,<span style="color:#ae81ff">2</span>])
+</code></pre></div><p>Same as above, we create diagonal matrices from our sampled <code>sigma_alpha</code>, <code>sigma_beta</code> values:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">sigmas <span style="color:#f92672">=</span> states[<span style="color:#ae81ff">2</span>]
+diag_sigmas <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>linalg<span style="color:#f92672">.</span>LinearOperatorDiag(sigmas)
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">inferred_covs <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>matmul(diag_sigmas<span style="color:#f92672">.</span>matmul(rhos),diag_sigmas)
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">plt<span style="color:#f92672">.</span>figure(figsize<span style="color:#f92672">=</span>(<span style="color:#ae81ff">9</span>,<span style="color:#ae81ff">4</span>))
+<span style="color:#66d9ef">for</span> (row_idx,col_idx), title <span style="color:#f92672">in</span> zip([(<span style="color:#ae81ff">0</span>,<span style="color:#ae81ff">0</span>),(<span style="color:#ae81ff">0</span>,<span style="color:#ae81ff">1</span>),(<span style="color:#ae81ff">1</span>,<span style="color:#ae81ff">1</span>)],[<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">$</span><span style="color:#e6db74">\</span><span style="color:#e6db74">sigma_{</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">alpha}$</span><span style="color:#e6db74">&#34;</span>,<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Covariance</span><span style="color:#e6db74">&#34;</span>,<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">$</span><span style="color:#e6db74">\</span><span style="color:#e6db74">sigma_{</span><span style="color:#ae81ff">\\</span><span style="color:#e6db74">beta}$</span><span style="color:#e6db74">&#34;</span>]):
+    plt<span style="color:#f92672">.</span>subplot(<span style="color:#ae81ff">131</span><span style="color:#f92672">+</span>row_idx<span style="color:#f92672">+</span>col_idx)
+    sns<span style="color:#f92672">.</span>distplot(inferred_covs[:,:,row_idx,col_idx]<span style="color:#f92672">.</span>numpy()<span style="color:#f92672">.</span>flatten(), label <span style="color:#f92672">=</span> <span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Posterior</span><span style="color:#e6db74">&#34;</span>)
+    plt<span style="color:#f92672">.</span>axvline(cov_matrix[row_idx,col_idx],c<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">k</span><span style="color:#e6db74">&#39;</span>,ls<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">--</span><span style="color:#e6db74">&#39;</span>,label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">True value</span><span style="color:#e6db74">&#34;</span>)
+    plt<span style="color:#f92672">.</span>legend()
+    plt<span style="color:#f92672">.</span>title(title)
+plt<span style="color:#f92672">.</span>tight_layout()
+</code></pre></div><p><img src="3.png" alt="png"></p>
 <p>We can also compare empirical waiting times with sampled waiting times:</p>
-
-<pre><code class="language-python">morning_wait_emp = df.query('afternoon == 0').groupby('café').wait.mean()
-afternoon_wait_emp = df.query('afternoon == 1').groupby('café').wait.mean()
-</code></pre>
-
-<pre><code class="language-python">morning_wait_pred = tf.reduce_mean(states[-1][:,:,:,0], axis=(0,1))
-afternoon_wait_pred = tf.reduce_mean(states[-1][:,:,:,1], axis=(0,1)) + morning_wait_pred
-</code></pre>
-
-<p>And we get the shrinkage that decorates Statistical Rethinking&rsquo;s front cover:</p>
-
-<pre><code class="language-python">plt.figure(figsize=(9,6))
-ax = plt.subplot(111)
-vals, vecs = np.linalg.eigh(np.cov(morning_wait_emp, afternoon_wait_emp))
-theta = np.degrees(np.arctan2(*vecs[:,0][::-1]))
-w, h = 2 * np.sqrt(vals)
-for contour_line in range(1,5):
-    ell = Ellipse(xy=(np.mean(morning_wait_emp), np.mean(afternoon_wait_emp)),
-                  width=w*contour_line, height=h*contour_line,
-                  angle=theta, color='black')
-    ell.set_facecolor('none')
-    ax.add_artist(ell)
-plt.scatter(morning_wait_emp,afternoon_wait_emp,label=&quot;Empirical&quot;)
-plt.scatter(morning_wait_pred,afternoon_wait_pred, label=&quot;MCMC&quot;)
-plt.scatter(morning_wait_emp.mean(),afternoon_wait_emp.mean(),marker='+',c='r',s=100, label=&quot;Grand Mean&quot;)
-plt.legend()
-for a,b,c,d in zip(morning_wait_emp, afternoon_wait_emp,  morning_wait_pred, afternoon_wait_pred):
-    plt.arrow(a,b,0.7*(c.numpy()-a),0.7*(d.numpy()-b), head_width=0.05, alpha=0.3)
-plt.xlabel(&quot;Morning wait&quot;)
-plt.ylabel(&quot;Afternoon wait&quot;)
-</code></pre>
-
-<p><img src="4.png" alt="png" /></p>
-<div class="footnotes">
-
-<hr />
-
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">morning_wait_emp <span style="color:#f92672">=</span> df<span style="color:#f92672">.</span>query(<span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">afternoon == 0</span><span style="color:#e6db74">&#39;</span>)<span style="color:#f92672">.</span>groupby(<span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">café</span><span style="color:#e6db74">&#39;</span>)<span style="color:#f92672">.</span>wait<span style="color:#f92672">.</span>mean()
+afternoon_wait_emp <span style="color:#f92672">=</span> df<span style="color:#f92672">.</span>query(<span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">afternoon == 1</span><span style="color:#e6db74">&#39;</span>)<span style="color:#f92672">.</span>groupby(<span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">café</span><span style="color:#e6db74">&#39;</span>)<span style="color:#f92672">.</span>wait<span style="color:#f92672">.</span>mean()
+</code></pre></div><div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">morning_wait_pred <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>reduce_mean(states[<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>][:,:,:,<span style="color:#ae81ff">0</span>], axis<span style="color:#f92672">=</span>(<span style="color:#ae81ff">0</span>,<span style="color:#ae81ff">1</span>))
+afternoon_wait_pred <span style="color:#f92672">=</span> tf<span style="color:#f92672">.</span>reduce_mean(states[<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>][:,:,:,<span style="color:#ae81ff">1</span>], axis<span style="color:#f92672">=</span>(<span style="color:#ae81ff">0</span>,<span style="color:#ae81ff">1</span>)) <span style="color:#f92672">+</span> morning_wait_pred
+</code></pre></div><p>And we get the shrinkage that decorates Statistical Rethinking&rsquo;s front cover:</p>
+<div class="highlight"><pre style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-python" data-lang="python">plt<span style="color:#f92672">.</span>figure(figsize<span style="color:#f92672">=</span>(<span style="color:#ae81ff">9</span>,<span style="color:#ae81ff">6</span>))
+ax <span style="color:#f92672">=</span> plt<span style="color:#f92672">.</span>subplot(<span style="color:#ae81ff">111</span>)
+vals, vecs <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>linalg<span style="color:#f92672">.</span>eigh(np<span style="color:#f92672">.</span>cov(morning_wait_emp, afternoon_wait_emp))
+theta <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>degrees(np<span style="color:#f92672">.</span>arctan2(<span style="color:#f92672">*</span>vecs[:,<span style="color:#ae81ff">0</span>][::<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>]))
+w, h <span style="color:#f92672">=</span> <span style="color:#ae81ff">2</span> <span style="color:#f92672">*</span> np<span style="color:#f92672">.</span>sqrt(vals)
+<span style="color:#66d9ef">for</span> contour_line <span style="color:#f92672">in</span> range(<span style="color:#ae81ff">1</span>,<span style="color:#ae81ff">5</span>):
+    ell <span style="color:#f92672">=</span> Ellipse(xy<span style="color:#f92672">=</span>(np<span style="color:#f92672">.</span>mean(morning_wait_emp), np<span style="color:#f92672">.</span>mean(afternoon_wait_emp)),
+                  width<span style="color:#f92672">=</span>w<span style="color:#f92672">*</span>contour_line, height<span style="color:#f92672">=</span>h<span style="color:#f92672">*</span>contour_line,
+                  angle<span style="color:#f92672">=</span>theta, color<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">black</span><span style="color:#e6db74">&#39;</span>)
+    ell<span style="color:#f92672">.</span>set_facecolor(<span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">none</span><span style="color:#e6db74">&#39;</span>)
+    ax<span style="color:#f92672">.</span>add_artist(ell)
+plt<span style="color:#f92672">.</span>scatter(morning_wait_emp,afternoon_wait_emp,label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Empirical</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>scatter(morning_wait_pred,afternoon_wait_pred, label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">MCMC</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>scatter(morning_wait_emp<span style="color:#f92672">.</span>mean(),afternoon_wait_emp<span style="color:#f92672">.</span>mean(),marker<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">+</span><span style="color:#e6db74">&#39;</span>,c<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#39;</span><span style="color:#e6db74">r</span><span style="color:#e6db74">&#39;</span>,s<span style="color:#f92672">=</span><span style="color:#ae81ff">100</span>, label<span style="color:#f92672">=</span><span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Grand Mean</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>legend()
+<span style="color:#66d9ef">for</span> a,b,c,d <span style="color:#f92672">in</span> zip(morning_wait_emp, afternoon_wait_emp,  morning_wait_pred, afternoon_wait_pred):
+    plt<span style="color:#f92672">.</span>arrow(a,b,<span style="color:#ae81ff">0.7</span><span style="color:#f92672">*</span>(c<span style="color:#f92672">.</span>numpy()<span style="color:#f92672">-</span>a),<span style="color:#ae81ff">0.7</span><span style="color:#f92672">*</span>(d<span style="color:#f92672">.</span>numpy()<span style="color:#f92672">-</span>b), head_width<span style="color:#f92672">=</span><span style="color:#ae81ff">0.05</span>, alpha<span style="color:#f92672">=</span><span style="color:#ae81ff">0.3</span>)
+plt<span style="color:#f92672">.</span>xlabel(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Morning wait</span><span style="color:#e6db74">&#34;</span>)
+plt<span style="color:#f92672">.</span>ylabel(<span style="color:#e6db74"></span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">Afternoon wait</span><span style="color:#e6db74">&#34;</span>)
+</code></pre></div><p><img src="4.png" alt="png"></p>
+<section class="footnotes" role="doc-endnotes">
+<hr>
 <ol>
-<li id="fn:1">Formally, the distribution is defined as: $\text{LKJ}\left(\Sigma\vert\eta\right)\propto\det\left(\Sigma\right)^{\left(\eta-1\right)}$. Intuitively, the correlation matrix defines an ellipsoid in $N$ dimensions, and its determinant is the volume of the ellipsoid. So, higher correlations -&gt; tighter ellipsoid -&gt; smaller volume -&gt; smaller determinant -&gt; more likely for small $\eta$ and less likely for large $\eta$.
- <a class="footnote-return" href="#fnref:1"><sup>^</sup></a></li>
-<li id="fn:2">Sigrid Keydana did an excellent job explaining TFP bijectors, and specifcally the intuition behind the jacobian correction, in <a href="https://blogs.rstudio.com/tensorflow/posts/2019-04-05-bijectors-flows/" target="_blank">this</a> post.
- <a class="footnote-return" href="#fnref:2"><sup>^</sup></a></li>
-<li id="fn:3">Overthinking boxes are specific (usually mathematical) dive-ins in Statistical Rethinking.
- <a class="footnote-return" href="#fnref:3"><sup>^</sup></a></li>
+<li id="fn:1" role="doc-endnote">
+<p>Formally, the distribution is defined as: $\text{LKJ}\left(\Sigma\vert\eta\right)\propto\det\left(\Sigma\right)^{\left(\eta-1\right)}$. Intuitively, the correlation matrix defines an ellipsoid in $N$ dimensions, and its determinant is the volume of the ellipsoid. So, higher correlations -&gt; tighter ellipsoid -&gt; smaller volume -&gt; smaller determinant -&gt; more likely for small $\eta$ and less likely for large $\eta$. <a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+<li id="fn:2" role="doc-endnote">
+<p>Sigrid Keydana did an excellent job explaining TFP bijectors, and specifcally the intuition behind the jacobian correction, in <a href="https://blogs.rstudio.com/tensorflow/posts/2019-04-05-bijectors-flows/">this</a> post. <a href="#fnref:2" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+<li id="fn:3" role="doc-endnote">
+<p>Overthinking boxes are specific (usually mathematical) dive-ins in Statistical Rethinking. <a href="#fnref:3" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
 </ol>
-</div>
+</section>
 
     </div>
 

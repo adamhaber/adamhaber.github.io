@@ -5,7 +5,7 @@
     <link>https://adamhaber.github.io/tags/</link>
       <atom:link href="https://adamhaber.github.io/tags/index.xml" rel="self" type="application/rss+xml" />
     <description>Tags</description>
-    <generator>Source Themes Academic (https://sourcethemes.com/academic/)</generator><language>en-us</language><lastBuildDate>Mon, 18 Nov 2019 00:00:00 +0000</lastBuildDate>
+    <generator>Source Themes Academic (https://sourcethemes.com/academic/)</generator><language>en-us</language><lastBuildDate>Thu, 21 May 2020 00:00:00 +0000</lastBuildDate>
     <image>
       <url>https://adamhaber.github.io/img/icon-192.png</url>
       <title>Tags</title>
@@ -15,8 +15,24 @@
     <item>
       <title>Bayesian Models</title>
       <link>https://adamhaber.github.io/tags/bayesian-models/</link>
-      <pubDate>Mon, 18 Nov 2019 00:00:00 +0000</pubDate>
+      <pubDate>Thu, 21 May 2020 00:00:00 +0000</pubDate>
       <guid>https://adamhaber.github.io/tags/bayesian-models/</guid>
+      <description></description>
+    </item>
+    
+    <item>
+      <title>Stan</title>
+      <link>https://adamhaber.github.io/tags/stan/</link>
+      <pubDate>Thu, 21 May 2020 00:00:00 +0000</pubDate>
+      <guid>https://adamhaber.github.io/tags/stan/</guid>
+      <description></description>
+    </item>
+    
+    <item>
+      <title>TFP</title>
+      <link>https://adamhaber.github.io/tags/tfp/</link>
+      <pubDate>Thu, 21 May 2020 00:00:00 +0000</pubDate>
+      <guid>https://adamhaber.github.io/tags/tfp/</guid>
       <description></description>
     </item>
     
@@ -25,14 +41,6 @@
       <link>https://adamhaber.github.io/tags/multilevel-models/</link>
       <pubDate>Mon, 18 Nov 2019 00:00:00 +0000</pubDate>
       <guid>https://adamhaber.github.io/tags/multilevel-models/</guid>
-      <description></description>
-    </item>
-    
-    <item>
-      <title>TFP</title>
-      <link>https://adamhaber.github.io/tags/tfp/</link>
-      <pubDate>Mon, 18 Nov 2019 00:00:00 +0000</pubDate>
-      <guid>https://adamhaber.github.io/tags/tfp/</guid>
       <description></description>
     </item>
     
