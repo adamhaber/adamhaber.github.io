@@ -5,7 +5,23 @@
     <link>https://adamhaber.github.io/authors/</link>
       <atom:link href="https://adamhaber.github.io/authors/index.xml" rel="self" type="application/rss+xml" />
     <description>Authors</description>
-    <generator>Source Themes Academic (https://sourcethemes.com/academic/)</generator><language>en-us</language>
+    <generator>Source Themes Academic (https://sourcethemes.com/academic/)</generator><language>en-us</language><lastBuildDate>Wed, 01 Apr 2020 00:00:00 +0000</lastBuildDate>
+    <item>
+      <title>Adam Haber</title>
+      <link>https://adamhaber.github.io/authors/adam-haber/</link>
+      <pubDate>Wed, 01 Apr 2020 00:00:00 +0000</pubDate>
+      <guid>https://adamhaber.github.io/authors/adam-haber/</guid>
+      <description></description>
+    </item>
+    
+    <item>
+      <title>Elad Schneidman</title>
+      <link>https://adamhaber.github.io/authors/elad-schneidman/</link>
+      <pubDate>Wed, 01 Apr 2020 00:00:00 +0000</pubDate>
+      <guid>https://adamhaber.github.io/authors/elad-schneidman/</guid>
+      <description></description>
+    </item>
+    
     <item>
       <title></title>
       <link>https://adamhaber.github.io/authors/admin/</link>

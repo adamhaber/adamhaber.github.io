@@ -1,17 +1,11 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Publications | Adam Haber</title>
-    <link>https://adamhaber.github.io/publication/</link>
-      <atom:link href="https://adamhaber.github.io/publication/index.xml" rel="self" type="application/rss+xml" />
-    <description>Publications</description>
+    <title>Adam Haber</title>
+    <link>https://adamhaber.github.io/authors/adam-haber/</link>
+      <atom:link href="https://adamhaber.github.io/authors/adam-haber/index.xml" rel="self" type="application/rss+xml" />
+    <description>Adam Haber</description>
     <generator>Source Themes Academic (https://sourcethemes.com/academic/)</generator><language>en-us</language><lastBuildDate>Wed, 01 Apr 2020 00:00:00 +0000</lastBuildDate>
-    <image>
-      <url>https://adamhaber.github.io/img/icon-192.png</url>
-      <title>Publications</title>
-      <link>https://adamhaber.github.io/publication/</link>
-    </image>
-    
     <item>
       <title>Learning the architectural features that predict functional similarity of neural networks</title>
       <link>https://adamhaber.github.io/publication/haber-2020/</link>
